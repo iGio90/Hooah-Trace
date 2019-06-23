@@ -123,7 +123,7 @@ function __HooahTrace() {
                 }
             } else {
                 try {
-                    return address.readUtf8String();
+                    return address.readUtf8String().replace('\n', ' ');
                 } catch (e) {
                     try {
                         address = address.readPointer();
