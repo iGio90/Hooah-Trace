@@ -135,7 +135,7 @@ function __HooahTrace() {
         return null;
     };
 
-    this._formatInstruction = function (address, instruction) {
+    this._formatInstruction = function (address, instruction, details) {
         var line = colorify(address.toString(), 'red');
         line += _getSpacer(4);
         line += colorify(_ba2hex(address.readByteArray(instruction.size)), 'yellow');
@@ -143,6 +143,17 @@ function __HooahTrace() {
         line += colorify(instruction.mnemonic, 'green');
         line += _getSpacer(70 - line.length);
         line += regexColor(instruction.opStr);
+        if (HooahTrace._isJumpInstruction(instruction) && !details) {
+            var range = Process.findRangeByAddress(address);
+            if (range !== null) {
+                line += _getSpacer(4) + '(';
+                if (typeof range.file !== 'undefined' && range.file !== null) {
+                    var parts = range.file.path.split('/');
+                    line += parts[parts.length - 1];
+                }
+                line += '#' + address.sub(range.base) + ')';
+            }
+        }
         return line;
     };
 
@@ -224,7 +235,7 @@ function __HooahTrace() {
                 instruction: instruction,
                 print: function (details) {
                     details = details || false;
-                    console.log(HooahTrace._formatInstruction(address, instruction));
+                    console.log(HooahTrace._formatInstruction(address, instruction, details));
                     if (details) {
                         console.log(HooahTrace._formatInstructionDetails(instruction, context))
                     }
@@ -267,7 +278,6 @@ function __HooahTrace() {
 
             const startPc = this.context.pc;
             const startRange = Process.findRangeByAddress(target);
-            var currentRange = startRange;
 
             var inTrampoline = true;
             var instructionsCount = 0;
@@ -318,17 +328,6 @@ function __HooahTrace() {
                                                 skipWholeBlock = true;
                                                 continue;
                                             }
-                                        }
-                                    }
-
-                                    if (parseInt(currentRange.base.sub(range.base)) !== 0) {
-                                        currentRange = range;
-                                        if (HooahTrace.details) {
-                                            var line = 'jumping to range ' + range.base;
-                                            if (haveFile) {
-                                                line += ' >> ' + range.file.path;
-                                            }
-                                            console.log(line);
                                         }
                                     }
                                 }
