@@ -66,7 +66,7 @@ function __HooahTrace() {
             console.log('tracer already running');
         }
 
-        const target = HooahTrace.getArg(args, key);
+        const target = HooahTrace.getArg(args, 'target');
         if (target === null) {
             console.log('missing target to attach');
             return null;
