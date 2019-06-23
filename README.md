@@ -1,7 +1,10 @@
 # Hooah Trace
 
-a simple yet powerful instruction tracing for frida. 
+a simple yet powerful instruction tracing for frida.
+
 an hook is placed to target provided which start the instruction tracing using frida Stalker.
+
+currently supporting only 64bit arch as we rely on stalker
 
 ## install
 
