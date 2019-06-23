@@ -13,7 +13,9 @@ const options = {
     // -1 is endless
     count: -1,
     // log instructions
-    verbose: true
+    verbose: true,
+    // with details
+    details: true
 };
 
 hooah.attach(target, options);

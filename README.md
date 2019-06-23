@@ -42,7 +42,9 @@ const options = {
     // -1 is endless
     count: -1,
     // log instructions
-    verbose: true
+    verbose: true,
+    // with details
+    details: true
 };
 
 hooah.attach(target, options);
@@ -114,4 +116,82 @@ hooah.attach(target, options);
 0x732ebc6e08    6afe5f48      ldaxrh         w10, [x19]
 0x732ebc6e0c    5f21286b      cmp            w10, w8, uxth
 0x732ebc6e10    81000054      b.ne           #0x732ebc6e20
+```
+
+### example output with details
+```
+0x732eb6d178    53d03bd5      mrs            x19, tpidr_el0
+     |---- x19 = 0x73303715e0
+0x732eb6d17c    e61f03ad      stp            q6, q7, [sp, #0x60]
+     |---- q6 = register not found in context
+     |---- q7 = register not found in context
+     |---- sp = 0x7fe1c4ac80
+0x732eb6d180    e41702ad      stp            q4, q5, [sp, #0x40]
+     |---- q4 = register not found in context
+     |---- q5 = register not found in context
+     |---- sp = 0x7fe1c4ac60
+0x732eb6d184    0a008852      mov            w10, #0x4000
+     |---- w10 = register not found in context
+0x732eb6d188    e20f01ad      stp            q2, q3, [sp, #0x20]
+     |---- q2 = register not found in context
+     |---- q3 = register not found in context
+     |---- sp = 0x7fe1c4ac40
+0x732eb6d18c    e803012a      mov            w8, w1
+     |---- w8 = register not found in context
+     |---- w1 = register not found in context
+0x732eb6d190    e00700ad      stp            q0, q1, [sp]
+     |---- q0 = register not found in context
+     |---- q1 = register not found in context
+     |---- sp = 0x7fe1c4ac20
+0x732eb6d194    0a08a072      movk           w10, #0x40, lsl #16
+     |---- w10 = register not found in context
+0x732eb6d198    a69f3ba9      stp            x6, x7, [x29, #-0x48]
+     |---- x6 = 0x30
+     |---- x7 = 0x0
+     |---- fp = 0x7fe1c4acc8
+0x732eb6d19c    0a010a0a      and            w10, w8, w10
+     |---- w10 = register not found in context
+     |---- w8 = register not found in context
+     |---- w10 = register not found in context
+0x732eb6d1a0    a4973aa9      stp            x4, x5, [x29, #-0x58]
+     |---- x4 = 0x72
+     |---- x5 = 0x7fe1c4ad82
+     |---- fp = 0x7fe1c4acb8
+0x732eb6d1a4    5f115071      cmp            w10, #0x404, lsl #12
+     |---- w10 = register not found in context
+0x732eb6d1a8    a28f39a9      stp            x2, x3, [x29, #-0x68]
+     |---- x2 = 0x1b6
+     |---- x3 = 0x64
+     |---- fp = 0x7fe1c4aca8
+0x732eb6d1ac    691640f9      ldr            x9, [x19, #0x28]
+     |---- x9 = 0x32d6148d1c954954
+     |---- x19 = 0x7330371608
+0x732eb6d1b0    a9831ef8      stur           x9, [x29, #-0x18]
+     |---- x9 = 0x32d6148d1c954954
+     |---- fp = 0x7fe1c4acf8
+0x732eb6d1b4    80000054      b.eq           #0x732eb6d1c4
+
+
+0x732eb6d1b8    68003037      tbnz           w8, #6, #0x732eb6d1c4
+     |---- w8 = register not found in context
+
+0x732eb6d1bc    e3031f2a      mov            w3, wzr
+     |---- w3 = register not found in context
+     |---- wzr = register not found in context
+0x732eb6d1c0    15000014      b              #0x732eb6d214
+
+
+0x732eb6d214    690c8012      mov            w9, #-0x64
+     |---- w9 = register not found in context
+0x732eb6d218    e10300aa      mov            x1, x0
+     |---- x1 = 0x732ef55868
+     |---- x0 = 0x732ef55868
+0x732eb6d21c    e203082a      mov            w2, w8
+     |---- w2 = register not found in context
+     |---- w8 = register not found in context
+0x732eb6d220    e003092a      mov            w0, w9
+     |---- w0 = register not found in context
+     |---- w9 = register not found in context
+0x732eb6d224    97150194      bl             #0x732ebb2880
+
 ```

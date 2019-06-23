@@ -1,9 +1,9 @@
 function __HooahTrace() {
     this.tid = 0;
     this.verbose = true;
+    this.details = true;
     this.callback = null;
     this.executionBlock = {};
-    this.currentContext = {};
 
     const _getSpacer = function (space) {
         var line = '';
@@ -39,17 +39,58 @@ function __HooahTrace() {
         line += instruction.mnemonic;
         line += _getSpacer(45 - line.length);
         line += instruction.opStr;
-
-        if (HooahTrace._isJumpInstruction(instruction)) {
-            line += '\n';
-        }
         return line;
+    };
+
+    this._formatInstructionDetails = function (instruction, context) {
+        const data = [];
+        instruction.operands.forEach(function (op) {
+            var reg = null;
+            var value = null;
+            var adds = 0;
+            if (op.type === 'mem') {
+                reg = op.value.base;
+                adds = op.value.disp;
+            } else if (op.type === 'reg') {
+                reg = op.value;
+            } else if (op.type === 'imm') {
+                if (data.length > 0) {
+                    value = data[data.length - 1][1];
+                    if (value.constructor.name === 'NativePointer') {
+                        data[data.length - 1][1].add(parseInt(op.value));
+                    }
+                }
+            }
+
+            if (reg !== null) {
+                try {
+                    value = context[reg];
+                    if (typeof value !== 'undefined') {
+                        data.push([reg, context[reg].add(adds)]);
+                    } else {
+                        data.push([reg, 'register not found in context']);
+                    }
+                } catch (e) {
+                    data.push([reg, 'register not found in context']);
+                }
+            }
+        });
+        var lines = '';
+        var spacer = _getSpacer((instruction.address.toString().length / 2) - 1);
+        data.forEach(function (row) {
+            if (lines.length > 0) {
+                lines += '\n';
+            }
+            lines += spacer + '|---- ' + row[0] + ' = ' + row[1]
+
+        });
+        return lines;
     };
 
     this.onHitInstruction = function (context, address) {
         address = address || context.pc;
         const instruction = HooahTrace.executionBlock[address.toString()];
-        HooahTrace.currentContext = context;
+
 
         if (typeof instruction === 'undefined') {
             console.log('stalker hit invalid instruction :\'(');
@@ -59,10 +100,15 @@ function __HooahTrace() {
 
         if (HooahTrace.verbose) {
             console.log(HooahTrace._formatInstruction(address, instruction));
+            if (HooahTrace.details) {
+                console.log(HooahTrace._formatInstructionDetails(instruction, context))
+            }
+            if (HooahTrace._isJumpInstruction(instruction)) {
+                console.log('');
+            }
         }
 
-        if (HooahTrace.callback !== null) {
-            if (HooahTrace.verbose)
+        if (HooahTrace.callback !== null && context !== null) {
             HooahTrace.callback.apply({
                 context: context,
                 instruction: instruction
@@ -98,6 +144,7 @@ function __HooahTrace() {
         const callback = HooahTrace.getArg(args, 'callback');
         const count = HooahTrace.getArg(args, 'count', -1);
         HooahTrace.verbose = HooahTrace.getArg(args, 'verbose', true);
+        HooahTrace.details = HooahTrace.getArg(args, 'details', false);
 
         const interceptor = Interceptor.attach(target, function () {
             interceptor.detach();
@@ -120,7 +167,7 @@ function __HooahTrace() {
 
                     if (HooahTrace.verbose && Object.keys(HooahTrace.executionBlock).length > 0) {
                         Object.keys(HooahTrace.executionBlock).forEach(function (address) {
-                            HooahTrace.onHitInstruction(HooahTrace.currentContext, ptr(address))
+                            HooahTrace.onHitInstruction(null, ptr(address))
                         })
                     }
 
