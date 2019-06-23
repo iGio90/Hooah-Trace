@@ -1,5 +1,5 @@
 function __HooahTrace() {
-    this.tracing = false;
+    this.tid = 0;
     this.verbose = true;
     this.callback = null;
     this.executionBlock = {};
@@ -32,7 +32,7 @@ function __HooahTrace() {
     };
 
     this._formatInstruction = function (address, instruction) {
-        var line = instruction.address;
+        var line = address.toString();
         line += _getSpacer(4);
         line += _ba2hex(address.readByteArray(instruction.size));
         line += _getSpacer(30 - line.length);
@@ -50,6 +50,12 @@ function __HooahTrace() {
         address = address || context.pc;
         const instruction = HooahTrace.executionBlock[address.toString()];
         HooahTrace.currentContext = context;
+
+        if (typeof instruction === 'undefined') {
+            console.log('stalker hit invalid instruction :\'(');
+            HooahTrace.detach();
+            return;
+        }
 
         if (HooahTrace.verbose) {
             console.log(HooahTrace._formatInstruction(address, instruction));
@@ -79,8 +85,8 @@ function __HooahTrace() {
     };
 
     this.attach = function (target, args) {
-        if (this.tracing) {
-            console.log('tracer already running');
+        if (HooahTrace.tid > 0) {
+            console.log('Hooah is already tracing thread: ' + HooahTrace.tid);
         }
 
         if (target === null) {
@@ -95,21 +101,20 @@ function __HooahTrace() {
 
         const interceptor = Interceptor.attach(target, function () {
             interceptor.detach();
-            if (HooahTrace.tracing) {
-                console.log('Hooah is already tracing another thread');
+            if (HooahTrace.tid > 0) {
+                console.log('Hooah is already tracing thread: ' + HooahTrace.tid);
                 return;
             }
 
-            HooahTrace.tracing = true;
+            HooahTrace.tid = Process.getCurrentThreadId();
             HooahTrace.callback = callback;
 
-            const tid = Process.getCurrentThreadId();
             const pc = this.context.pc;
 
             var inTrampoline = true;
             var instructionsCount = 0;
 
-            Stalker.follow(tid, {
+            Stalker.follow(HooahTrace.tid, {
                 transform: function (iterator) {
                     var instruction;
 
@@ -143,7 +148,7 @@ function __HooahTrace() {
                             if (count > 0) {
                                 instructionsCount++;
                                 if (instructionsCount === count) {
-                                    Stalker.unfollow(tid);
+                                    HooahTrace.detach();
                                 }
                             }
                         }
@@ -151,6 +156,11 @@ function __HooahTrace() {
                 }
             });
         });
+    };
+
+    this.detach = function () {
+        Stalker.unfollow(HooahTrace.tid);
+        HooahTrace.tid = 0;
     };
 
     return this;
