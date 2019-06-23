@@ -1,6 +1,9 @@
 function __HooahTrace() {
     this.tracing = false;
+    this.verbose = true;
     this.callback = null;
+    this.executionBlock = {};
+    this.currentContext = {};
 
     const _getSpacer = function (space) {
         var line = '';
@@ -24,33 +27,43 @@ function __HooahTrace() {
         return hexStr;
     };
 
-    this.onHitInstruction = function (context) {
-        const instruction = Instruction.parse(context.pc);
+    this._isJumpInstruction = function (instruction) {
+        return instruction.groups.indexOf('jump') >= 0 || instruction.groups.indexOf('ret') >= 0;
+    };
 
+    this._formatInstruction = function (address, instruction) {
         var line = instruction.address;
         line += _getSpacer(4);
-        line += _ba2hex(context.pc.readByteArray(instruction.size));
+        line += _ba2hex(address.readByteArray(instruction.size));
         line += _getSpacer(30 - line.length);
         line += instruction.mnemonic;
         line += _getSpacer(45 - line.length);
         line += instruction.opStr;
 
-        if (instruction.groups.indexOf('jump') >= 0 || instruction.groups.indexOf('ret') >= 0) {
+        if (HooahTrace._isJumpInstruction(instruction)) {
             line += '\n';
+        }
+        return line;
+    };
+
+    this.onHitInstruction = function (context, address) {
+        address = address || context.pc;
+        const instruction = HooahTrace.executionBlock[address.toString()];
+        HooahTrace.currentContext = context;
+
+        if (HooahTrace.verbose) {
+            console.log(HooahTrace._formatInstruction(address, instruction));
         }
 
         if (HooahTrace.callback !== null) {
-            const that = {
+            if (HooahTrace.verbose)
+            HooahTrace.callback.apply({
                 context: context,
-                instruction: instruction,
-                print: function () {
-                    console.log(line);
-                }
-            };
-            HooahTrace.callback.apply(that);
-        } else {
-            console.log(line);
+                instruction: instruction
+            });
         }
+
+        delete HooahTrace.executionBlock[address.toString()];
     };
 
     this.getArg = function (args, key, def) {
@@ -78,6 +91,7 @@ function __HooahTrace() {
         args = args || null;
         const callback = HooahTrace.getArg(args, 'callback');
         const count = HooahTrace.getArg(args, 'count', -1);
+        HooahTrace.verbose = HooahTrace.getArg(args, 'verbose', true);
 
         const interceptor = Interceptor.attach(target, function () {
             interceptor.detach();
@@ -98,6 +112,13 @@ function __HooahTrace() {
             Stalker.follow(tid, {
                 transform: function (iterator) {
                     var instruction;
+
+                    if (HooahTrace.verbose && Object.keys(HooahTrace.executionBlock).length > 0) {
+                        Object.keys(HooahTrace.executionBlock).forEach(function (address) {
+                            HooahTrace.onHitInstruction(HooahTrace.currentContext, ptr(address))
+                        })
+                    }
+
                     while ((instruction = iterator.next()) !== null) {
                         iterator.keep();
 
@@ -109,7 +130,16 @@ function __HooahTrace() {
                         }
 
                         if (!inTrampoline) {
+                            HooahTrace.executionBlock[instruction.address.toString()] = new function () {
+                                this.address = instruction.address;
+                                this.mnemonic = instruction.mnemonic;
+                                this.opStr = instruction.opStr;
+                                this.groups = instruction.groups;
+                                this.operands = instruction.operands;
+                                this.size = instruction.size;
+                            };
                             iterator.putCallout(HooahTrace.onHitInstruction);
+
                             if (count > 0) {
                                 instructionsCount++;
                                 if (instructionsCount === count) {

@@ -30,9 +30,6 @@ example code
 const hooah = require('hooah-trace');
 
 function onHookInstruction() {
-    // log this hook
-    this.print();
-
     // use for fun and profit
     // this.context
     // this.instruction
@@ -43,7 +40,9 @@ const options = {
     // out callback for each instruction
     callback: onHookInstruction,
     // -1 is endless
-    count: -1
+    count: -1,
+    // log instructions
+    verbose: true
 };
 
 hooah.attach(target, options);
