@@ -174,6 +174,7 @@ jumping to range 0x72496d3000 >> /data/app/com.target/lib/arm64/libtarget.so
 * make output colorized
 * improve telescope, show symbols on jumps
 * added back this.print() instruction with details
+* added notes to this.print
 * some logic improvements
 ```
 
