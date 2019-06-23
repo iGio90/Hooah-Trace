@@ -53,25 +53,31 @@ function __HooahTrace() {
         }
     };
 
+    this.getArg = function (args, key) {
+        var arg = args[key];
+        if (typeof arg === 'undefined') {
+            arg = null;
+        }
+        return arg;
+    };
+
     this.attach = function (args) {
         if (this.tracing) {
             console.log('tracer already running');
         }
 
-        const target = args['target'];
-        if (typeof target === 'undefined') {
+        const target = HooahTrace.getArg(args, key);
+        if (target === null) {
             console.log('missing target to attach');
             return null;
         }
 
-        var callback = args['callback'];
-        if (typeof callback === 'undefined') {
-            callback = null;
-        }
+        const callback = HooahTrace.getArg(args, 'callback');
 
         const interceptor = Interceptor.attach(target, function () {
             interceptor.detach();
             if (HooahTrace.tracing) {
+                console.log('Hooah is already tracing another thread');
                 return;
             }
 
