@@ -63,8 +63,6 @@ function __HooahTrace() {
     };
 
     this.tid = 0;
-    this.verbose = true;
-    this.details = true;
     this.callback = null;
     this.executionBlock = {};
 
@@ -220,20 +218,20 @@ function __HooahTrace() {
             return;
         }
 
-        if (HooahTrace.verbose) {
-            console.log(HooahTrace._formatInstruction(address, instruction));
-            if (HooahTrace.details) {
-                console.log(HooahTrace._formatInstructionDetails(instruction, context))
-            }
-            if (HooahTrace._isJumpInstruction(instruction)) {
-                console.log('');
-            }
-        }
-
         if (HooahTrace.callback !== null && context !== null) {
             HooahTrace.callback.apply({
                 context: context,
-                instruction: instruction
+                instruction: instruction,
+                print: function (details) {
+                    details = details || false;
+                    console.log(HooahTrace._formatInstruction(address, instruction));
+                    if (details) {
+                        console.log(HooahTrace._formatInstructionDetails(instruction, context))
+                    }
+                    if (HooahTrace._isJumpInstruction(instruction)) {
+                        console.log('');
+                    }
+                }
             });
         }
 
@@ -256,8 +254,6 @@ function __HooahTrace() {
         const count = HooahTrace._getArg(args, 'count', -1);
         const rangeOnly = HooahTrace._getArg(args, 'rangeOnly', false);
         const excludedModules = HooahTrace._getArg(args, 'excludedModules', []);
-        HooahTrace.verbose = HooahTrace._getArg(args, 'verbose', true);
-        HooahTrace.details = HooahTrace._getArg(args, 'details', false);
 
         const interceptor = Interceptor.attach(target, function () {
             interceptor.detach();

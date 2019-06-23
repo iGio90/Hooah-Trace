@@ -20,6 +20,15 @@ function onHookInstruction() {
     // use for fun and profit
     // this.context
     // this.instruction
+
+    const mnemonic = this.instruction.mnemonic;
+    if (mnemonic === 'ldr') {
+        // print the instruction with register details
+        this.print(true);
+    } else {
+        // print all other instructions with stripped details
+        this.print();
+    }
 }
 
 const target = Module.findExportByName(null, 'open');
@@ -28,10 +37,6 @@ const options = {
     callback: onHookInstruction,
     // -1 is endless
     count: -1,
-    // log instructions
-    verbose: true,
-    // with details
-    details: false,
     // do not trace outside the current range
     rangeOnly: false,
     // do not trace jumps in excluded modules (i.e libc / libSystem)
