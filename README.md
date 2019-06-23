@@ -44,7 +44,11 @@ const options = {
     // log instructions
     verbose: true,
     // with details
-    details: true
+    details: false,
+    // do not trace outside the current range
+    rangeOnly: false,
+    // do not trace jumps in excluded modules (i.e libc / libSystem)
+    excludedModules: []
 };
 
 hooah.attach(target, options);
@@ -120,36 +124,46 @@ hooah.attach(target, options);
 
 ### example output with details
 ```
-0x732eb6d178    53d03bd5      mrs            x19, tpidr_el0
-     |---------     x19 = 0x73303715e0 >> 0x73303715e0
-0x732eb6d17c    e61f03ad      stp            q6, q7, [sp, #0x60]
-     |---------     sp = 0x7fe1c4ac80 >> 0x0
-0x732eb6d180    e41702ad      stp            q4, q5, [sp, #0x40]
-     |---------     sp = 0x7fe1c4ac60 >> 0x0
-0x732eb6d184    0a008852      mov            w10, #0x4000
+0x7249e06254    00013fd6    blr      x8
+     |---------     x8 = 0x7249b47c54 >> str x28, [sp, #-0x60]!  (libtarget.so#0x474c54)
 
-0x732eb6d188    e20f01ad      stp            q2, q3, [sp, #0x20]
-     |---------     sp = 0x7fe1c4ac40 >> ing trace proper
-0x732eb6d18c    e803012a      mov            w8, w1
+jumping to range 0x72496d3000 >> /data/app/com.target/lib/arm64/libtarget.so
+0x7249b47c54    fc0f1af8    str      x28, [sp, #-0x60]!
+     |---------     x28 = 0x72496cda5c >> 0xa9017bfdf81e0ff3
+     |---------     sp = 0x7249505420 >> 0x8020080280200802
+0x7249b47c58    fa6701a9    stp      x26, x25, [sp, #0x10]
+     |---------     x26 = 0x73303715e0 >> 0x73303715e0
+     |---------     x25 = 0x7249408000
+     |---------     sp = 0x7249505430 >> 0x0
+0x7249b47c5c    f85f02a9    stp      x24, x23, [sp, #0x20]
+     |---------     x24 = 0x7249505570 >> 
+     |---------     x23 = 0x58
+     |---------     sp = 0x7249505440 >> 0x0
+0x7249b47c60    f65703a9    stp      x22, x21, [sp, #0x30]
+     |---------     x22 = 0x5f0200005f02
+     |---------     x21 = 0x72495054f0 >> 0x724a86c4f0
+     |---------     sp = 0x7249505450 >> 0x0
+0x7249b47c64    f44f04a9    stp      x20, x19, [sp, #0x40]
+     |---------     x20 = 0x72495054f0 >> 0x724a86c4f0
+     |---------     x19 = 0x72a0aaa940 >> 0x0
+     |---------     sp = 0x7249505460 >> 0x8020080280200802
+0x7249b47c68    fd7b05a9    stp      x29, x30, [sp, #0x50]
+     |---------     fp = 0x7249505490 >> 0x72495054b0
+     |---------     lr = 0x7249e06258 >> 0xf900027ff9400274
+     |---------     sp = 0x7249505470 >> 0֣+s
+0x7249b47c6c    fd430191    add      x29, sp, #0x50
+     |---------     fp = 0x7249505490 >> 0x72495054b0
+     |---------     sp = 0x7249505420 >> 0x72496cda5c
+```
 
-0x732eb6d190    e00700ad      stp            q0, q1, [sp]
-     |---------     sp = 0x7fe1c4ac20 >> ................ags
-0x732eb6d194    0a08a072      movk           w10, #0x40, lsl #16
+---
+## Changelog
 
-0x732eb6d198    a69f3ba9      stp            x6, x7, [x29, #-0x48]
-     |---------     x6 = 0x30
-     |---------     x7 = 0x0
-     |---------     fp = 0x7fe1c4acc8 >> 0
-0x732eb6d19c    0a010a0a      and            w10, w8, w10
-
-0x732eb6d1a0    a4973aa9      stp            x4, x5, [x29, #-0x58]
-     |---------     x4 = 0x72
-     |---------     x5 = 0x7fe1c4ad82 >> 341 exited due to signal (9)
-     |---------     fp = 0x7fe1c4acb8 >> r
-0x732eb6d1a4    5f115071      cmp            w10, #0x404, lsl #12
-
-0x732eb6d1a8    a28f39a9      stp            x2, x3, [x29, #-0x68]
-     |---------     x2 = 0x1b6
-     |---------     x3 = 0x64
-     |---------     fp = 0x7fe1c4aca8 >> 0x1b6
+**2019.06.24**
+```
+* added rangeOnly option
+* added excludedModules option
+* make output colorized
+* improve telescope, show symbols on jumps
+* some logic improvements
 ```
