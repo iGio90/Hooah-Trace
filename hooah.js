@@ -135,10 +135,10 @@ function __HooahTrace() {
         return null;
     };
 
-    this._formatInstruction = function (address, instruction, details) {
+    this._formatInstruction = function (address, instruction, details, annotation) {
         var line = colorify(address.toString(), 'red');
         line += _getSpacer(4);
-        line += colorify(_ba2hex(address.readByteArray(instruction.size)), 'yellow');
+        line += colorify(_ba2hex(instruction.bytes), 'yellow');
         line += _getSpacer(50 - line.length);
         line += colorify(instruction.mnemonic, 'green');
         line += _getSpacer(70 - line.length);
@@ -153,6 +153,10 @@ function __HooahTrace() {
                 }
                 line += '#' + address.sub(range.base) + ')';
             }
+        }
+
+        if (typeof annotation !== 'undefined' && annotation !== null && annotation !== '') {
+            line += '\t\t@' + colorify(annotation, 'pink');
         }
         return line;
     };
@@ -233,9 +237,10 @@ function __HooahTrace() {
             HooahTrace.callback.apply({
                 context: context,
                 instruction: instruction,
-                print: function (details) {
+                print: function (details, annotation) {
                     details = details || false;
-                    console.log(HooahTrace._formatInstruction(address, instruction, details));
+                    annotation = annotation || "";
+                    console.log(HooahTrace._formatInstruction(address, instruction, details, annotation));
                     if (details) {
                         console.log(HooahTrace._formatInstructionDetails(instruction, context))
                     }
@@ -340,6 +345,7 @@ function __HooahTrace() {
                                 this.groups = instruction.groups;
                                 this.operands = instruction.operands;
                                 this.size = instruction.size;
+                                this.bytes = instruction.address.readByteArray(this.size);
                             };
 
                             iterator.putCallout(HooahTrace.onHitInstruction);

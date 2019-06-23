@@ -25,6 +25,9 @@ function onHookInstruction() {
     if (mnemonic === 'ldr') {
         // print the instruction with register details
         this.print(true);
+    } else if (mnemonic === 'stp') {
+        // add some notes to stp instructions
+        this.print(false, "stp " + this.context.pc)
     } else {
         // print all other instructions with stripped details
         this.print();
