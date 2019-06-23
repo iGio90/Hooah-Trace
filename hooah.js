@@ -31,6 +31,33 @@ function __HooahTrace() {
         return instruction.groups.indexOf('jump') >= 0 || instruction.groups.indexOf('ret') >= 0;
     };
 
+    this._getArg = function (args, key, def) {
+        def = def || null;
+        if (args === null) {
+            return def;
+        }
+        var arg = args[key];
+        if (typeof arg === 'undefined') {
+            arg = def;
+        }
+        return arg;
+    };
+
+    this._getTelescope = function (address) {
+        var range = Process.findRangeByAddress(address);
+        if (range !== null) {
+            try {
+                return address.readUtf8String();
+            } catch (e) {
+                try {
+                    address = address.readPointer();
+                    return address;
+                } catch (e) {}
+            }
+        }
+        return null;
+    };
+
     this._formatInstruction = function (address, instruction) {
         var line = address.toString();
         line += _getSpacer(4);
@@ -44,6 +71,7 @@ function __HooahTrace() {
 
     this._formatInstructionDetails = function (instruction, context) {
         const data = [];
+        const visited = [];
         instruction.operands.forEach(function (op) {
             var reg = null;
             var value = null;
@@ -62,35 +90,49 @@ function __HooahTrace() {
                 }
             }
 
-            if (reg !== null) {
+            if (reg !== null && visited.indexOf(reg) === -1) {
+                visited.push(reg);
                 try {
                     value = context[reg];
                     if (typeof value !== 'undefined') {
-                        data.push([reg, context[reg].add(adds)]);
+                        value = context[reg].add(adds);
+                        data.push([reg, value, HooahTrace._getTelescope(value)]);
                     } else {
-                        data.push([reg, 'register not found in context']);
+                        //data.push([reg, 'register not found in context']);
                     }
                 } catch (e) {
-                    data.push([reg, 'register not found in context']);
+                    //data.push([reg, 'register not found in context']);
                 }
             }
         });
-        var lines = '';
+        var lines = [];
         var spacer = _getSpacer((instruction.address.toString().length / 2) - 1);
         data.forEach(function (row) {
             if (lines.length > 0) {
-                lines += '\n';
+                lines[lines.length - 1] += '\n';
             }
-            lines += spacer + '|---- ' + row[0] + ' = ' + row[1]
-
+            var line = spacer + '|---------' + spacer;
+            line += row[0] + ' = ' + row[1];
+            if (row.length > 2 && row[2] !== null) {
+                if (row[2].length === 0) {
+                    line += ' >> 0x0';
+                } else {
+                    line += ' >> ' + row[2];
+                }
+            }
+            lines.push(line);
         });
-        return lines;
+
+        var ret = '';
+        lines.forEach(function (line) {
+           ret += line;
+        });
+        return ret;
     };
 
     this.onHitInstruction = function (context, address) {
         address = address || context.pc;
         const instruction = HooahTrace.executionBlock[address.toString()];
-
 
         if (typeof instruction === 'undefined') {
             console.log('stalker hit invalid instruction :\'(');
@@ -118,18 +160,6 @@ function __HooahTrace() {
         delete HooahTrace.executionBlock[address.toString()];
     };
 
-    this.getArg = function (args, key, def) {
-        def = def || null;
-        if (args === null) {
-            return def;
-        }
-        var arg = args[key];
-        if (typeof arg === 'undefined') {
-            arg = def;
-        }
-        return arg;
-    };
-
     this.attach = function (target, args) {
         if (HooahTrace.tid > 0) {
             console.log('Hooah is already tracing thread: ' + HooahTrace.tid);
@@ -141,10 +171,10 @@ function __HooahTrace() {
         }
 
         args = args || null;
-        const callback = HooahTrace.getArg(args, 'callback');
-        const count = HooahTrace.getArg(args, 'count', -1);
-        HooahTrace.verbose = HooahTrace.getArg(args, 'verbose', true);
-        HooahTrace.details = HooahTrace.getArg(args, 'details', false);
+        const callback = HooahTrace._getArg(args, 'callback');
+        const count = HooahTrace._getArg(args, 'count', -1);
+        HooahTrace.verbose = HooahTrace._getArg(args, 'verbose', true);
+        HooahTrace.details = HooahTrace._getArg(args, 'details', false);
 
         const interceptor = Interceptor.attach(target, function () {
             interceptor.detach();
