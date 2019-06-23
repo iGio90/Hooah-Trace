@@ -1,0 +1,13 @@
+{
+  "name": "hooah-trace",
+  "version": "1.0.0",
+  "description": "Instruction tracing with frida",
+  "main": "hooah.js",
+  "dependencies": {
+    "@babel/core": "^7.1.2",
+    "@babel/plugin-transform-runtime": "^7.1.0",
+    "@babel/preset-env": "^7.1.0",
+    "@babel/runtime-corejs2": "^7.1.2",
+    "frida-compile": "^8.0.0"
+  }
+}
