@@ -53,26 +53,31 @@ function __HooahTrace() {
         }
     };
 
-    this.getArg = function (args, key) {
+    this.getArg = function (args, key, def) {
+        def = def || null;
+        if (args === null) {
+            return def;
+        }
         var arg = args[key];
         if (typeof arg === 'undefined') {
-            arg = null;
+            arg = def;
         }
         return arg;
     };
 
-    this.attach = function (args) {
+    this.attach = function (target, args) {
         if (this.tracing) {
             console.log('tracer already running');
         }
 
-        const target = HooahTrace.getArg(args, 'target');
         if (target === null) {
             console.log('missing target to attach');
             return null;
         }
 
+        args = args || null;
         const callback = HooahTrace.getArg(args, 'callback');
+        const count = HooahTrace.getArg(args, 'count', -1);
 
         const interceptor = Interceptor.attach(target, function () {
             interceptor.detach();
@@ -88,6 +93,7 @@ function __HooahTrace() {
             const pc = this.context.pc;
 
             var inTrampoline = true;
+            var instructionsCount = 0;
 
             Stalker.follow(tid, {
                 transform: function (iterator) {
@@ -104,6 +110,12 @@ function __HooahTrace() {
 
                         if (!inTrampoline) {
                             iterator.putCallout(HooahTrace.onHitInstruction);
+                            if (count > 0) {
+                                instructionsCount++;
+                                if (instructionsCount === count) {
+                                    Stalker.unfollow(tid);
+                                }
+                            }
                         }
                     }
                 }

@@ -11,8 +11,10 @@ function onHookInstruction() {
 
 const target = Module.findExportByName(null, 'open');
 const options = {
-    target: target,
-    callback: onHookInstruction
+    // out callback for each instruction
+    callback: onHookInstruction,
+    // -1 is endless
+    count: -1
 };
 
-hooah.attach(options);
+hooah.attach(target, options);
