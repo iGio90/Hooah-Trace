@@ -15,7 +15,11 @@ const options = {
     // log instructions
     verbose: true,
     // with details
-    details: true
+    details: false,
+    // do not trace outside the current range
+    rangeOnly: false,
+    // do not trace jumps in excluded modules (i.e libc / libSystem)
+    excludedModules: []
 };
 
 hooah.attach(target, options);

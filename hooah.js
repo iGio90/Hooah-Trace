@@ -1,4 +1,51 @@
 function __HooahTrace() {
+    const _red = '\x1b[0;31m';
+    const _green = '\x1b[0;32m';
+    const _yellow = '\x1b[0;33m';
+    const _blue = '\x1b[0;34m';
+    const _pink = '\x1b[0;35m';
+    const _cyan = '\x1b[0;36m';
+    const _bold = '\x1b[0;1m';
+    const _highlight = '\x1b[0;3m';
+    const _highlight_off = '\x1b[0;23m';
+    const _resetColor = '\x1b[0m';
+
+    const colorify = function (what, pat) {
+        var ret = '';
+        if (pat.indexOf('bold') >= 0) {
+            ret += _bold + ' ';
+        } else if (pat.indexOf('highlight') >= 0) {
+            ret += _highlight;
+        }
+        if (pat.indexOf('red') >= 0) {
+            ret += _red;
+        } else if (pat.indexOf('green') >= 0) {
+            ret += _green;
+        } else if (pat.indexOf('yellow') >= 0) {
+            ret += _yellow;
+        } else if (pat.indexOf('blue') >= 0) {
+            ret += _blue;
+        } else if (pat.indexOf('pink') >= 0) {
+            ret += _pink;
+        } else if (pat.indexOf('cyan') >= 0) {
+            ret += _cyan
+        }
+
+        ret += what;
+        if (pat.indexOf('highlight') >= 0) {
+            ret += _highlight_off;
+        }
+        ret += _resetColor;
+        return ret;
+    };
+
+    const regexColor = function(text) {
+        text = text.toString();
+        //text = text.replace(/(\W)([a-z]{1,2}\d{0,2})(\W|$)/gm, "$1" + colorify("$2", 'cyan') + "$3");
+        text = text.replace(/(0x[0123456789abcdef]+)/gm, colorify("$1", 'red'));
+        return text;
+    };
+
     this.tid = 0;
     this.verbose = true;
     this.details = true;
@@ -43,29 +90,45 @@ function __HooahTrace() {
         return arg;
     };
 
-    this._getTelescope = function (address) {
+    this._getTelescope = function (address, isJumpInstruction) {
         var range = Process.findRangeByAddress(address);
         if (range !== null) {
-            try {
-                return address.readUtf8String();
-            } catch (e) {
+            if (isJumpInstruction) {
                 try {
-                    address = address.readPointer();
-                    return address;
-                } catch (e) {}
+                    const instruction = Instruction.parse(address);
+                    var ret = colorify(instruction.mnemonic, 'green') + ' ' + regexColor(instruction.opStr);
+                    ret += _getSpacer(2) + '(';
+                    if (typeof range.file !== 'undefined' && range.file !== null) {
+                        var parts = range.file.path.split('/');
+                        ret += parts[parts.length - 1];
+                    }
+                    ret += '#' + address.sub(range.base);
+                    return ret + ')';
+                } catch (e) {
+                    return null;
+                }
+            } else {
+                try {
+                    return address.readUtf8String();
+                } catch (e) {
+                    try {
+                        address = address.readPointer();
+                        return address;
+                    } catch (e) {}
+                }
             }
         }
         return null;
     };
 
     this._formatInstruction = function (address, instruction) {
-        var line = address.toString();
+        var line = colorify(address.toString(), 'red');
         line += _getSpacer(4);
-        line += _ba2hex(address.readByteArray(instruction.size));
-        line += _getSpacer(30 - line.length);
-        line += instruction.mnemonic;
-        line += _getSpacer(45 - line.length);
-        line += instruction.opStr;
+        line += colorify(_ba2hex(address.readByteArray(instruction.size)), 'yellow');
+        line += _getSpacer(50 - line.length);
+        line += colorify(instruction.mnemonic, 'green');
+        line += _getSpacer(70 - line.length);
+        line += regexColor(instruction.opStr);
         return line;
     };
 
@@ -96,7 +159,8 @@ function __HooahTrace() {
                     value = context[reg];
                     if (typeof value !== 'undefined') {
                         value = context[reg].add(adds);
-                        data.push([reg, value, HooahTrace._getTelescope(value)]);
+                        data.push([reg, value, HooahTrace._getTelescope(value,
+                            HooahTrace._isJumpInstruction(instruction))]);
                     } else {
                         //data.push([reg, 'register not found in context']);
                     }
@@ -112,12 +176,12 @@ function __HooahTrace() {
                 lines[lines.length - 1] += '\n';
             }
             var line = spacer + '|---------' + spacer;
-            line += row[0] + ' = ' + row[1];
+            line += colorify(row[0], 'blue') + ' = ' + regexColor(row[1]);
             if (row.length > 2 && row[2] !== null) {
                 if (row[2].length === 0) {
-                    line += ' >> 0x0';
+                    line += ' >> ' + colorify('0x0', 'red');
                 } else {
-                    line += ' >> ' + row[2];
+                    line += ' >> ' + regexColor(row[2]);
                 }
             }
             lines.push(line);
@@ -170,9 +234,12 @@ function __HooahTrace() {
             return null;
         }
 
+        // parse options
         args = args || null;
         const callback = HooahTrace._getArg(args, 'callback');
         const count = HooahTrace._getArg(args, 'count', -1);
+        const rangeOnly = HooahTrace._getArg(args, 'rangeOnly', false);
+        const excludedModules = HooahTrace._getArg(args, 'excludedModules', []);
         HooahTrace.verbose = HooahTrace._getArg(args, 'verbose', true);
         HooahTrace.details = HooahTrace._getArg(args, 'details', false);
 
@@ -186,7 +253,9 @@ function __HooahTrace() {
             HooahTrace.tid = Process.getCurrentThreadId();
             HooahTrace.callback = callback;
 
-            const pc = this.context.pc;
+            const startPc = this.context.pc;
+            const startRange = Process.findRangeByAddress(target);
+            var currentRange = startRange;
 
             var inTrampoline = true;
             var instructionsCount = 0;
@@ -194,24 +263,65 @@ function __HooahTrace() {
             Stalker.follow(HooahTrace.tid, {
                 transform: function (iterator) {
                     var instruction;
+                    var range;
 
-                    if (HooahTrace.verbose && Object.keys(HooahTrace.executionBlock).length > 0) {
-                        Object.keys(HooahTrace.executionBlock).forEach(function (address) {
-                            HooahTrace.onHitInstruction(null, ptr(address))
-                        })
-                    }
+                    var skipWholeBlock = false;
 
                     while ((instruction = iterator.next()) !== null) {
-                        iterator.keep();
+                        if (skipWholeBlock) {
+                            continue;
+                        }
 
                         if (inTrampoline) {
-                            const testAddress = parseInt(instruction.address.sub(pc));
+                            const testAddress = parseInt(instruction.address.sub(startPc));
                             if (testAddress > 0 && testAddress < 0x30) {
                                 inTrampoline = false;
                             }
                         }
 
                         if (!inTrampoline) {
+                            if (typeof range === 'undefined') {
+                                range = Process.findRangeByAddress(instruction.address);
+                            }
+
+                            if (range !== null) {
+                                if (rangeOnly) {
+                                    if (parseInt(startRange.base.sub(range.base)) !== 0) {
+                                        skipWholeBlock = true;
+                                        continue;
+                                    }
+                                } else {
+                                    const file = range.file;
+                                    const haveFile = typeof file !== 'undefined' && file !== null;
+                                    if (excludedModules.length > 0) {
+                                        if (haveFile) {
+                                            var filtered = false;
+                                            for (var i=0;i<excludedModules.length;i++) {
+                                                if (file.path.indexOf(excludedModules[i]) >= 0) {
+                                                    filtered = true;
+                                                    break;
+                                                }
+                                            }
+                                            if (filtered) {
+                                                skipWholeBlock = true;
+                                                continue;
+                                            }
+                                        }
+                                    }
+
+                                    if (parseInt(currentRange.base.sub(range.base)) !== 0) {
+                                        currentRange = range;
+                                        if (HooahTrace.details) {
+                                            var line = 'jumping to range ' + range.base;
+                                            if (haveFile) {
+                                                line += ' >> ' + range.file.path;
+                                            }
+                                            console.log(line);
+                                        }
+                                    }
+                                }
+                            }
+
                             HooahTrace.executionBlock[instruction.address.toString()] = new function () {
                                 this.address = instruction.address;
                                 this.mnemonic = instruction.mnemonic;
@@ -220,6 +330,7 @@ function __HooahTrace() {
                                 this.operands = instruction.operands;
                                 this.size = instruction.size;
                             };
+
                             iterator.putCallout(HooahTrace.onHitInstruction);
 
                             if (count > 0) {
@@ -229,6 +340,8 @@ function __HooahTrace() {
                                 }
                             }
                         }
+
+                        iterator.keep();
                     }
                 }
             });
