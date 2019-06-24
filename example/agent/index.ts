@@ -18,8 +18,9 @@ import * as hooah from "hooah-trace";
 
 function onHookInstruction(hc: hooah.HooahContext) {
     // use for fun and profit
-    // this.context
-    // this.instruction
+    // hc.context
+    // hc.instruction
+    // hc.print
 
     // the following code is meant to show the api exposed by htrace
     const mnemonic = hc.instruction.mnemonic;
