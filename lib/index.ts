@@ -14,14 +14,20 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/>
  */
+interface AnyCpuContext extends PortableCpuContext {
+    [name: string]: NativePointer;
+}
+
+export interface HooahPrintOptions {
+    colored?: boolean | undefined;
+    details?: boolean | undefined;
+    annotation?: string | undefined;
+}
+
 interface HooahOptions {
     count?: number | undefined;
     rangeOnly?: boolean | undefined;
     excludedModules?: string[] | undefined;
-}
-
-interface AnyCpuContext extends PortableCpuContext {
-    [name: string]: NativePointer;
 }
 
 export interface HooahContext {
@@ -54,7 +60,6 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
         return 1;
     }
 
-    // parse options
     const { count = -1, rangeOnly = false, excludedModules = [] } = params;
 
     const interceptor = Interceptor.attach(target, function () {
@@ -165,12 +170,17 @@ export function detach(): void {
 
 function applyColorFilters(text: string): string {
     text = text.toString();
-    //text = text.replace(/(\W)([a-z]{1,2}\d{0,2})(\W|$)/gm, "$1" + colorify("$2", 'cyan') + "$3");
+    //text = text.replace(/(\W)([a-z]{1,2}\d{0,2})(\W|$)/gm, "$1" + colorify("$2", 'blue') + "$3");
+    text = text.replace(/(\W|^)([a-z]{1,3}\d{0,2})(\W|$)/gm, "$1" + colorify("$2", 'blue') + "$3");
     text = text.replace(/(0x[0123456789abcdef]+)/gm, colorify("$1", 'red'));
+    text = text.replace(/#(\d+)/gm, "#" + colorify("$1", 'red'));
     return text;
 }
 
 function colorify(what: string, pat:string): string {
+    if (pat === 'filter') {
+        return applyColorFilters(what);
+    }
     let ret = '';
     if (pat.indexOf('bold') >= 0) {
         ret += _bold + ' ';
@@ -214,13 +224,13 @@ function onHitInstruction(context: PortableCpuContext, address: NativePointer): 
         const ctx: HooahContext = {
             context: context,
             instruction: instruction,
-            print(details: boolean, annotation: string): void {
-                details = details || false;
-                annotation = annotation || "";
+            print(params: HooahPrintOptions = {}): void {
+                const { details = false, colored = false, annotation = "" } = params;
+
                 if (instruction) {
-                    console.log(_formatInstruction(address, instruction, details, annotation));
+                    console.log(_formatInstruction(address, instruction, details, annotation, colored));
                     if (details) {
-                        console.log(_formatInstructionDetails(instruction, context))
+                        console.log(_formatInstructionDetails(instruction, context, colored))
                     }
                     if (_isJumpInstruction(instruction)) {
                         console.log('');
@@ -249,25 +259,50 @@ function _ba2hex(b: ArrayBuffer): string {
     return hexStr;
 }
 
-function _formatInstruction(address: NativePointer, instruction: Instruction,
-                            details: boolean, annotation: string): string {
-    let line = colorify(address.toString(), 'red');
+function _formatInstruction(
+    address: NativePointer, instruction: Instruction, details: boolean, annotation: string,
+    colored: boolean): string {
+
+    let line = address.toString();
+    let coloredLine = colorify(address.toString(), 'red');
+    let part: string;
+    const fourSpace = _getSpacer(4);
+
+    const append = function(what: string, color: string | null) {
+        line += what;
+        if (colored) {
+            if (color) {
+                coloredLine += colorify(what, color);
+            } else {
+                coloredLine += what;
+            }
+        }
+    };
+
+    append(fourSpace, null);
 
     const bytes = instruction.address.readByteArray(instruction.size);
-    line += _getSpacer(4);
     if (bytes) {
-        line += colorify(_ba2hex(bytes), 'yellow');
+        part = _ba2hex(bytes);
+        append(part, 'yellow');
     } else {
         let _fix = '';
         for (let i=0;i<instruction.size;i++) {
             _fix += '00';
         }
-        line += colorify(_fix, 'yellow');
+        append(_fix, 'yellow');
     }
-    line += _getSpacer(50 - line.length);
-    line += colorify(instruction.mnemonic, 'green');
-    line += _getSpacer(70 - line.length);
-    line += applyColorFilters(instruction.opStr);
+
+    part = _getSpacer(28 - line.length);
+    append(part, null);
+
+    append(instruction.mnemonic, 'green');
+
+    part = _getSpacer(35 - line.length);
+    append(part, null);
+
+    append(instruction.opStr, 'filter');
+
     if (_isJumpInstruction(instruction) && !details) {
         let range: RangeDetails | null = null;
         if (executionBlockRange && _isAddressInRange(address, executionBlockRange)) {
@@ -276,23 +311,33 @@ function _formatInstruction(address: NativePointer, instruction: Instruction,
             range = Process.findRangeByAddress(address);
         }
         if (range !== null) {
-            line += _getSpacer(4) + '(';
+            append(fourSpace + '(', null);
+
             if (typeof range.file !== 'undefined') {
                 let parts = range.file.path.split('/');
-                line += parts[parts.length - 1];
+                part = parts[parts.length - 1];
+                append(part, null);
             }
-            line += '#' + address.sub(range.base) + ')';
+
+            part = '#' + address.sub(range.base) + ')';
+            append(part, null);
         }
     }
 
     if (typeof annotation !== 'undefined' && annotation !== '') {
-        line += _getSpacer(110 - line.length);
-        line += '@' + colorify(annotation, 'pink');
+        part = _getSpacer(65 - line.length);
+        append(part, null);
+
+        append('@' + annotation, 'pink');
+    }
+
+    if (colored) {
+        return coloredLine;
     }
     return line;
 }
 
-function _formatInstructionDetails(instruction: Instruction, context: PortableCpuContext): string {
+function _formatInstructionDetails(instruction: Instruction, context: PortableCpuContext, colored: boolean): string {
     const anyContext = context as AnyCpuContext;
     const data: any[] = [];
     const visited: Set<string> = new Set<string>();
@@ -342,17 +387,24 @@ function _formatInstructionDetails(instruction: Instruction, context: PortableCp
 
     let lines: string[] = [];
     let spacer = _getSpacer((instruction.address.toString().length / 2) - 1);
+    const _applyColor = function(what: string, color: string | null): string {
+        if (colored && color) {
+            what = colorify(what, color);
+        }
+        return what;
+    };
+
     data.forEach(row => {
         if (lines.length > 0) {
             lines[lines.length - 1] += '\n';
         }
         let line = spacer + '|---------' + spacer;
-        line += colorify(row[0], 'blue') + ' = ' + applyColorFilters(row[1]);
+        line += _applyColor(row[0], 'blue') + ' = ' + _applyColor(row[1], 'filter');
         if (row.length > 2 && row[2] !== null) {
             if (row[2].length === 0) {
-                line += ' >> ' + colorify('0x0', 'red');
+                line += ' >> ' + _applyColor('0x0', 'red');
             } else {
-                line += ' >> ' + applyColorFilters(row[2]);
+                line += ' >> ' + _applyColor(row[2], 'filter');
             }
         }
         lines.push(line);
@@ -413,4 +465,8 @@ function _isAddressInRange(address: NativePointer, range: RangeDetails): boolean
 
 function _isJumpInstruction(instruction: Instruction): boolean {
     return instruction.groups.indexOf('jump') >= 0 || instruction.groups.indexOf('ret') >= 0;
+}
+
+function _uncoloredStringLength(text: string): number {
+    return text.replace(/\x1b\[(0;)?\d+m/gm, "").length;
 }

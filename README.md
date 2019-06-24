@@ -4,7 +4,7 @@ a simple yet powerful instruction tracing for frida.
 
 an hook is placed to target provided which start the instruction tracing using frida Stalker.
 
-currently supporting only 64bit arch as we rely on stalker
+you can play with the api available in the example or code your own logic
 
 ## install
 
@@ -34,17 +34,30 @@ function onHookInstruction(hc: htrace.HooahContext) {
     // this.context
     // this.instruction
 
+    // the following code is meant to show the api exposed by htrace
     const mnemonic = hc.instruction.mnemonic;
+
+    // count stp instructions
+    let stpCount: number = 0;
+
+    // build our print option, if we want to use it
+    const printOptions: htrace.HooahPrintOptions = {};
+
+    // yes please
+    printOptions.colored = true;
+
     if (mnemonic === 'ldr') {
         // print the instruction with register details
-        hc.print(true);
+        printOptions.details = true;
     } else if (mnemonic === 'stp') {
         // add some notes to stp instructions
-        hc.print(false, "stp " + hc.context.pc)
+        stpCount += 1;
+        printOptions.annotation = 'stpCount: ' + stpCount;
     } else {
-        // print all other instructions with stripped details
-        hc.print();
+        // print all other instructions with default options
     }
+
+    hc.print(printOptions);
 }
 
 const target = Module.findExportByName(null, 'open');
