@@ -14,9 +14,9 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/>
  */
-import * as htrace from "hooah-trace";
+import * as hooah from "hooah-trace";
 
-function onHookInstruction(hc: htrace.HooahContext) {
+function onHookInstruction(hc: hooah.HooahContext) {
     // use for fun and profit
     // this.context
     // this.instruction
@@ -28,7 +28,7 @@ function onHookInstruction(hc: htrace.HooahContext) {
     let stpCount: number = 0;
 
     // build our print option, if we want to use it
-    const printOptions: htrace.HooahPrintOptions = {};
+    const printOptions: hooah.HooahPrintOptions = {};
 
     // yes please
     printOptions.colored = true;
@@ -49,7 +49,7 @@ function onHookInstruction(hc: htrace.HooahContext) {
 
 const target = Module.findExportByName(null, 'open');
 if (target) {
-    htrace.attach(target, onHookInstruction, {
+    hooah.attach(target, onHookInstruction, {
         // -1 is endless
         count: -1,
         // do not trace outside the current range
