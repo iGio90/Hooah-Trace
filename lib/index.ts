@@ -44,6 +44,7 @@ const _highlight_off = '\x1b[0;23m';
 const _resetColor = '\x1b[0m';
 
 const executionBlockAddresses = new Set<string>();
+let executionBlockRange: RangeDetails | null = null;
 let targetTid = 0;
 let onInstructionCallback: HooahCallback | null = null;
 
@@ -69,7 +70,6 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
         const startPc = this.context.pc;
         const startRange: RangeDetails | null = Process.findRangeByAddress(target);
 
-        let tracedRange: RangeDetails | null = null;
         let inTrampoline = true;
         let instructionsCount = 0;
 
@@ -92,44 +92,45 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
                     }
 
                     if (!inTrampoline) {
-                        if (range === undefined) {
-                            if (tracedRange !== null) {
-                                if (instruction.address.compare(tracedRange.base) >= 0 &&
-                                    instruction.address.compare(tracedRange.base.add(tracedRange.size)) < 0) {
-                                    range = tracedRange;
-                                }
-                            }
-
+                        if (rangeOnly || excludedModules.length > 0) {
                             if (range === undefined) {
-                                range = Process.findRangeByAddress(instruction.address);
-                                if (range !== null) {
-                                    tracedRange = range;
+                                if (executionBlockRange !== null) {
+                                    if (_isAddressInRange(instruction.address, executionBlockRange)) {
+                                        range = executionBlockRange;
+                                    }
+                                }
+
+                                if (range === undefined) {
+                                    range = Process.findRangeByAddress(instruction.address);
+                                    if (range !== null) {
+                                        executionBlockRange = range;
+                                    }
                                 }
                             }
-                        }
 
-                        if (rangeOnly) {
-                            if (startRange != null && range !== null &&
-                                startRange.base.compare(range.base) !== 0) {
-                                skipWholeBlock = true;
-                                continue;
-                            }
-                        } else {
-                            if (range !== null) {
-                                const file: FileMapping | undefined = range.file;
-                                const haveFile = typeof file !== 'undefined';
-                                if (excludedModules.length > 0) {
-                                    if (haveFile) {
-                                        let filtered = false;
-                                        for (let i=0;i<excludedModules.length;i++) {
-                                            if (file && file.path.indexOf(excludedModules[i]) >= 0) {
-                                                filtered = true;
-                                                break;
+                            if (rangeOnly) {
+                                if (startRange != null && range !== null &&
+                                    startRange.base.compare(range.base) !== 0) {
+                                    skipWholeBlock = true;
+                                    continue;
+                                }
+                            } else {
+                                if (range !== null) {
+                                    const file: FileMapping | undefined = range.file;
+                                    const haveFile = typeof file !== 'undefined';
+                                    if (excludedModules.length > 0) {
+                                        if (haveFile) {
+                                            let filtered = false;
+                                            for (let i=0;i<excludedModules.length;i++) {
+                                                if (file && file.path.indexOf(excludedModules[i]) >= 0) {
+                                                    filtered = true;
+                                                    break;
+                                                }
                                             }
-                                        }
-                                        if (filtered) {
-                                            skipWholeBlock = true;
-                                            continue;
+                                            if (filtered) {
+                                                skipWholeBlock = true;
+                                                continue;
+                                            }
                                         }
                                     }
                                 }
@@ -162,6 +163,13 @@ export function detach(): void {
     targetTid = 0;
 }
 
+function applyColorFilters(text: string): string {
+    text = text.toString();
+    //text = text.replace(/(\W)([a-z]{1,2}\d{0,2})(\W|$)/gm, "$1" + colorify("$2", 'cyan') + "$3");
+    text = text.replace(/(0x[0123456789abcdef]+)/gm, colorify("$1", 'red'));
+    return text;
+}
+
 function colorify(what: string, pat:string): string {
     let ret = '';
     if (pat.indexOf('bold') >= 0) {
@@ -191,19 +199,40 @@ function colorify(what: string, pat:string): string {
     return ret;
 }
 
-function regexColor(text: string): string {
-    text = text.toString();
-    //text = text.replace(/(\W)([a-z]{1,2}\d{0,2})(\W|$)/gm, "$1" + colorify("$2", 'cyan') + "$3");
-    text = text.replace(/(0x[0123456789abcdef]+)/gm, colorify("$1", 'red'));
-    return text;
-}
+function onHitInstruction(context: PortableCpuContext, address: NativePointer): void {
+    address = address || context.pc;
 
-function _getSpacer(space: number): string {
-    let line = '';
-    for (let i=0;i<space;i++) {
-        line += ' ';
+    if (!executionBlockAddresses.has(address.toString())) {
+        console.log('stalker hit invalid instruction :\'(');
+        detach();
+        return;
     }
-    return line;
+
+    const instruction: Instruction = Instruction.parse(address);
+
+    if (onInstructionCallback !== null) {
+        const ctx: HooahContext = {
+            context: context,
+            instruction: instruction,
+            print(details: boolean, annotation: string): void {
+                details = details || false;
+                annotation = annotation || "";
+                if (instruction) {
+                    console.log(_formatInstruction(address, instruction, details, annotation));
+                    if (details) {
+                        console.log(_formatInstructionDetails(instruction, context))
+                    }
+                    if (_isJumpInstruction(instruction)) {
+                        console.log('');
+                    }
+                }
+            }
+        };
+
+        onInstructionCallback.apply({}, [ctx]);
+    }
+
+    executionBlockAddresses.delete(address.toString());
 }
 
 function _ba2hex(b: ArrayBuffer): string {
@@ -220,46 +249,8 @@ function _ba2hex(b: ArrayBuffer): string {
     return hexStr;
 }
 
-function _isJumpInstruction(instruction: Instruction): boolean {
-    return instruction.groups.indexOf('jump') >= 0 || instruction.groups.indexOf('ret') >= 0;
-}
-
-function _getTelescope(address: NativePointer, isJumpInstruction: boolean) {
-    let range = Process.findRangeByAddress(address);
-    if (range !== null) {
-        if (isJumpInstruction) {
-            try {
-                const instruction = Instruction.parse(address);
-                let ret = colorify(instruction.mnemonic, 'green') + ' ' + regexColor(instruction.opStr);
-                ret += _getSpacer(2) + '(';
-                if (typeof range.file !== 'undefined') {
-                    let parts = range.file.path.split('/');
-                    ret += parts[parts.length - 1];
-                }
-                ret += '#' + address.sub(range.base);
-                return ret + ')';
-            } catch (e) {
-                return null;
-            }
-        } else {
-            try {
-                let result: string | null = address.readUtf8String();
-                if (result !== null) {
-                    return result.replace('\n', ' ');
-                }
-            } catch (e) {
-                try {
-                    address = address.readPointer();
-                    return address;
-                } catch (e) {}
-            }
-        }
-    }
-    return null;
-}
-
 function _formatInstruction(address: NativePointer, instruction: Instruction,
-    details: boolean, annotation: string): string {
+                            details: boolean, annotation: string): string {
     let line = colorify(address.toString(), 'red');
 
     const bytes = instruction.address.readByteArray(instruction.size);
@@ -276,9 +267,14 @@ function _formatInstruction(address: NativePointer, instruction: Instruction,
     line += _getSpacer(50 - line.length);
     line += colorify(instruction.mnemonic, 'green');
     line += _getSpacer(70 - line.length);
-    line += regexColor(instruction.opStr);
+    line += applyColorFilters(instruction.opStr);
     if (_isJumpInstruction(instruction) && !details) {
-        let range = Process.findRangeByAddress(address);
+        let range: RangeDetails | null = null;
+        if (executionBlockRange && _isAddressInRange(address, executionBlockRange)) {
+            range = executionBlockRange;
+        } else {
+            range = Process.findRangeByAddress(address);
+        }
         if (range !== null) {
             line += _getSpacer(4) + '(';
             if (typeof range.file !== 'undefined') {
@@ -290,7 +286,8 @@ function _formatInstruction(address: NativePointer, instruction: Instruction,
     }
 
     if (typeof annotation !== 'undefined' && annotation !== '') {
-        line += '\t\t@' + colorify(annotation, 'pink');
+        line += _getSpacer(110 - line.length);
+        line += '@' + colorify(annotation, 'pink');
     }
     return line;
 }
@@ -302,7 +299,7 @@ function _formatInstructionDetails(instruction: Instruction, context: PortableCp
 
     let insn: Arm64Instruction | X86Instruction | null = null;
     if (Process.arch === 'arm64') {
-       insn = instruction as Arm64Instruction;
+        insn = instruction as Arm64Instruction;
     } else if (Process.arch === 'ia32' || Process.arch === 'x64') {
         insn = instruction as X86Instruction;
     }
@@ -345,18 +342,17 @@ function _formatInstructionDetails(instruction: Instruction, context: PortableCp
 
     let lines: string[] = [];
     let spacer = _getSpacer((instruction.address.toString().length / 2) - 1);
-    console.log(data);
     data.forEach(row => {
         if (lines.length > 0) {
             lines[lines.length - 1] += '\n';
         }
         let line = spacer + '|---------' + spacer;
-        line += colorify(row[0], 'blue') + ' = ' + regexColor(row[1]);
+        line += colorify(row[0], 'blue') + ' = ' + applyColorFilters(row[1]);
         if (row.length > 2 && row[2] !== null) {
             if (row[2].length === 0) {
                 line += ' >> ' + colorify('0x0', 'red');
             } else {
-                line += ' >> ' + regexColor(row[2]);
+                line += ' >> ' + applyColorFilters(row[2]);
             }
         }
         lines.push(line);
@@ -369,38 +365,52 @@ function _formatInstructionDetails(instruction: Instruction, context: PortableCp
     return ret;
 }
 
-function onHitInstruction(context: PortableCpuContext, address: NativePointer): void {
-    address = address || context.pc;
-
-    if (!executionBlockAddresses.has(address.toString())) {
-        console.log('stalker hit invalid instruction :\'(');
-        detach();
-        return;
-    }
-
-    const instruction: Instruction = Instruction.parse(address);
-
-    if (onInstructionCallback !== null) {
-        const ctx: HooahContext = {
-            context: context,
-            instruction: instruction,
-            print(details: boolean, annotation: string): void {
-                details = details || false;
-                annotation = annotation || "";
-                if (instruction) {
-                    console.log(_formatInstruction(address, instruction, details, annotation));
-                    if (details) {
-                        console.log(_formatInstructionDetails(instruction, context))
-                    }
-                    if (_isJumpInstruction(instruction)) {
-                        console.log('');
-                    }
+function _getTelescope(address: NativePointer, isJumpInstruction: boolean) {
+    let range = Process.findRangeByAddress(address);
+    if (range !== null) {
+        if (isJumpInstruction) {
+            try {
+                const instruction = Instruction.parse(address);
+                let ret = colorify(instruction.mnemonic, 'green') + ' ' + applyColorFilters(instruction.opStr);
+                ret += _getSpacer(2) + '(';
+                if (typeof range.file !== 'undefined') {
+                    let parts = range.file.path.split('/');
+                    ret += parts[parts.length - 1];
                 }
+                ret += '#' + address.sub(range.base);
+                return ret + ')';
+            } catch (e) {
+                return null;
             }
-        };
-
-        onInstructionCallback.apply({}, [ctx]);
+        } else {
+            try {
+                let result: string | null = address.readUtf8String();
+                if (result !== null) {
+                    return result.replace('\n', ' ');
+                }
+            } catch (e) {
+                try {
+                    address = address.readPointer();
+                    return address;
+                } catch (e) {}
+            }
+        }
     }
+    return null;
+}
 
-    executionBlockAddresses.delete(address.toString());
+function _getSpacer(space: number): string {
+    let line = '';
+    for (let i=0;i<space;i++) {
+        line += ' ';
+    }
+    return line;
+}
+
+function _isAddressInRange(address: NativePointer, range: RangeDetails): boolean {
+    return address.compare(range.base) >= 0 && address.compare(range.base.add(range.size)) < 0;
+}
+
+function _isJumpInstruction(instruction: Instruction): boolean {
+    return instruction.groups.indexOf('jump') >= 0 || instruction.groups.indexOf('ret') >= 0;
 }
