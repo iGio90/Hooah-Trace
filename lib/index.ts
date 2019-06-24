@@ -1,18 +1,23 @@
 /**
- Hooah Trace (htrace) - Copyright (C) 2019 Giovanni (iGio90) Rocca
+ Copyright (c) 2019 Giovanni (iGio90) Rocca
 
- This program is free software: you can redistribute it and/or modify
- it under the terms of the GNU General Public License as published by
- the Free Software Foundation, either version 3 of the License, or
- (at your option) any later version.
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
 
- This program is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- GNU General Public License for more details.
+ The above copyright notice and this permission notice shall be included in all
+ copies or substantial portions of the Software.
 
- You should have received a copy of the GNU General Public License
- along with this program.  If not, see <https://www.gnu.org/licenses/>
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ SOFTWARE.
  */
 interface AnyCpuContext extends PortableCpuContext {
     [name: string]: NativePointer;
@@ -84,6 +89,8 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
                 let instruction: Arm64Instruction | X86Instruction | null;
                 let skipWholeBlock = false;
 
+                console.log('begin transform block');
+
                 while ((instruction = iterator.next()) !== null) {
                     if (skipWholeBlock) {
                         continue;
@@ -143,8 +150,14 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
                         }
 
                         executionBlockAddresses.add(instruction.address.toString());
+                        console.log('in iterator instruction: ' + instruction.address, instruction.mnemonic, instruction.opStr);
 
-                        iterator.putCallout(<(context: PortableCpuContext) => void>onHitInstruction);
+                        //iterator.putCallout(<(context: PortableCpuContext) => void>onHitInstruction);
+
+                        iterator.putCallout(function (context) {
+                            const instruction = Instruction.parse(context.pc);
+                            console.log('in callout instruction: ' + instruction.address, instruction.mnemonic, instruction.opStr);
+                        });
 
                         if (count > 0) {
                             instructionsCount++;
