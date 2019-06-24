@@ -31,9 +31,9 @@ npm run watch
 
 example code
 ```typescript
-import * as htrace from "hooah-trace";
+import * as hooah from "hooah-trace";
 
-function onHookInstruction(hc: htrace.HooahContext) {
+function onHookInstruction(hc: hooah.HooahContext) {
     // use for fun and profit
     // hc.context
     // hc.instruction
@@ -46,7 +46,7 @@ function onHookInstruction(hc: htrace.HooahContext) {
     let stpCount: number = 0;
 
     // build our print option, if we want to use it
-    const printOptions: htrace.HooahPrintOptions = {};
+    const printOptions: hooah.HooahPrintOptions = {};
 
     // yes please
     printOptions.colored = true;
@@ -67,13 +67,11 @@ function onHookInstruction(hc: htrace.HooahContext) {
 
 const target = Module.findExportByName(null, 'open');
 if (target) {
-    htrace.attach(target, onHookInstruction, {
+    hooah.attach(target, onHookInstruction, {
         // -1 is endless
         count: -1,
-        // do not trace outside the current range
-        rangeOnly: false,
         // do not trace jumps in excluded modules (i.e libc / libSystem)
-        excludedModules: []
+        filterModules: ['libc.so']
     });
 }
 ```
