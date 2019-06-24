@@ -32,7 +32,7 @@ def on_message(message, payload):
         print(message)
 
 
-if not os.path.exists('compiled_agent.js'):
+if not os.path.exists('_agent.js'):
     print('use `npm install` to build the agent')
     exit(0)
 
