@@ -24,7 +24,7 @@ function onHookInstruction(hc: htrace.HooahContext) {
     const mnemonic = hc.instruction.mnemonic;
     if (mnemonic === 'ldr') {
         // print the instruction with register details
-        hc.print(true);
+        hc.print(false);
     } else if (mnemonic === 'stp') {
         // add some notes to stp instructions
         hc.print(false, "stp " + hc.context.pc)

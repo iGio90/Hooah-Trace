@@ -43,7 +43,7 @@ const _highlight = '\x1b[0;3m';
 const _highlight_off = '\x1b[0;23m';
 const _resetColor = '\x1b[0m';
 
-const executionBlock = new Map<string, Arm64Instruction | X86Instruction>();
+const executionBlock = new Set<string>();
 let targetTid = 0;
 let onInstructionCallback: HooahCallback | null = null;
 
@@ -124,7 +124,7 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
                             }
                         }
 
-                        executionBlock.set(instruction.address.toString(), instruction);
+                        executionBlock.add(instruction.address.toString());
 
                         iterator.putCallout(<(context: PortableCpuContext) => void>onHitInstruction);
 
@@ -283,47 +283,57 @@ function _formatInstruction(address: NativePointer, instruction: Instruction,
     return line;
 }
 
-function _formatInstructionDetails(instruction: Arm64Instruction | X86Instruction, context: PortableCpuContext): string {
+function _formatInstructionDetails(instruction: Instruction, context: PortableCpuContext): string {
     const anyContext = context as AnyCpuContext;
     const data: any[] = [];
     const visited: Set<string> = new Set<string>();
 
-    instruction.operands.forEach((op: Arm64Operand | X86Operand) => {
-        let reg: Arm64Register | X86Register | undefined;
-        let value = null;
-        let adds = 0;
-        if (op.type === 'mem') {
-            reg = op.value.base;
-            adds = op.value.disp;
-        } else if (op.type === 'reg') {
-            reg = op.value;
-        } else if (op.type === 'imm') {
-            if (data.length > 0) {
-                value = data[data.length - 1][1];
-                if (value.constructor.name === 'NativePointer') {
-                    data[data.length - 1][1].add(op.value);
+    let insn: Arm64Instruction | X86Instruction | null = null;
+    if (Process.arch === 'arm64') {
+       insn = instruction as Arm64Instruction;
+    } else if (Process.arch === 'ia32' || Process.arch === 'x64') {
+        insn = instruction as X86Instruction;
+    }
+    if (insn != null) {
+        insn.operands.forEach((op: Arm64Operand | X86Operand) => {
+            let reg: Arm64Register | X86Register | undefined;
+            let value = null;
+            let adds = 0;
+            if (op.type === 'mem') {
+                reg = op.value.base;
+                adds = op.value.disp;
+            } else if (op.type === 'reg') {
+                reg = op.value;
+            } else if (op.type === 'imm') {
+                if (data.length > 0) {
+                    value = data[data.length - 1][1];
+                    if (value.constructor.name === 'NativePointer') {
+                        data[data.length - 1][1].add(op.value);
+                    }
                 }
             }
-        }
 
-        if (typeof reg !== 'undefined' && !visited.has(reg)) {
-            visited.add(reg);
-            try {
-                value = anyContext[reg];
-                if (typeof value !== 'undefined') {
-                    value = anyContext[reg].add(adds);
-                    data.push([reg, value, _getTelescope(value,
-                        _isJumpInstruction(instruction))]);
-                } else {
+            if (typeof reg !== 'undefined' && !visited.has(reg)) {
+                visited.add(reg);
+                try {
+                    value = anyContext[reg];
+                    if (typeof value !== 'undefined') {
+                        value = anyContext[reg].add(adds);
+                        data.push([reg, value, _getTelescope(value,
+                            _isJumpInstruction(instruction))]);
+                    } else {
+                        //data.push([reg, 'register not found in context']);
+                    }
+                } catch (e) {
                     //data.push([reg, 'register not found in context']);
                 }
-            } catch (e) {
-                //data.push([reg, 'register not found in context']);
             }
-        }
-    });
+        });
+    }
+
     let lines: string[] = [];
     let spacer = _getSpacer((instruction.address.toString().length / 2) - 1);
+    console.log(data);
     data.forEach(row => {
         if (lines.length > 0) {
             lines[lines.length - 1] += '\n';
@@ -349,13 +359,14 @@ function _formatInstructionDetails(instruction: Arm64Instruction | X86Instructio
 
 function onHitInstruction(context: PortableCpuContext, address: NativePointer): void {
     address = address || context.pc;
-    const instruction: Arm64Instruction | X86Instruction | undefined = executionBlock.get(address.toString());
 
-    if (typeof instruction === 'undefined') {
+    if (!executionBlock.has(address.toString())) {
         console.log('stalker hit invalid instruction :\'(');
         detach();
         return;
     }
+
+    const instruction: Instruction = Instruction.parse(address);
 
     if (onInstructionCallback !== null) {
         const ctx: HooahContext = {
