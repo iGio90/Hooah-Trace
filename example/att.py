@@ -31,7 +31,7 @@ if not os.path.exists('compiled_agent.js'):
 d = frida.get_usb_device()
 pid = d.spawn('com.my.target')
 session = d.attach(pid)
-script = session.create_script(open('compiled_agent.js', 'r').read())
+script = session.create_script(open('_agent.js', 'r').read())
 script.on('message', on_message)
 script.load()
 d.resume(pid)
