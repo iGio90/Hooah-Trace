@@ -43,7 +43,7 @@ const _highlight = '\x1b[0;3m';
 const _highlight_off = '\x1b[0;23m';
 const _resetColor = '\x1b[0m';
 
-const executionBlock = new Set<string>();
+const executionBlockAddresses = new Set<string>();
 let targetTid = 0;
 let onInstructionCallback: HooahCallback | null = null;
 
@@ -69,14 +69,14 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
         const startPc = this.context.pc;
         const startRange: RangeDetails | null = Process.findRangeByAddress(target);
 
+        let tracedRange: RangeDetails | null = null;
         let inTrampoline = true;
         let instructionsCount = 0;
 
         Stalker.follow(targetTid, {
             transform: function (iterator: StalkerArm64Iterator | StalkerX86Iterator) {
-                let instruction: X86Instruction | null | Arm64Instruction;
-                let range: RangeDetails | null = null;
-
+                let range: RangeDetails | null | undefined;
+                let instruction: Arm64Instruction | X86Instruction | null;
                 let skipWholeBlock = false;
 
                 while ((instruction = iterator.next()) !== null) {
@@ -92,8 +92,20 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
                     }
 
                     if (!inTrampoline) {
-                        if (range == null) {
-                            range = Process.findRangeByAddress(instruction.address);
+                        if (range === undefined) {
+                            if (tracedRange !== null) {
+                                if (instruction.address.compare(tracedRange.base) >= 0 &&
+                                    instruction.address.compare(tracedRange.base.add(tracedRange.size)) < 0) {
+                                    range = tracedRange;
+                                }
+                            }
+
+                            if (range === undefined) {
+                                range = Process.findRangeByAddress(instruction.address);
+                                if (range !== null) {
+                                    tracedRange = range;
+                                }
+                            }
                         }
 
                         if (rangeOnly) {
@@ -103,7 +115,7 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
                                 continue;
                             }
                         } else {
-                            if (range) {
+                            if (range !== null) {
                                 const file: FileMapping | undefined = range.file;
                                 const haveFile = typeof file !== 'undefined';
                                 if (excludedModules.length > 0) {
@@ -124,7 +136,7 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
                             }
                         }
 
-                        executionBlock.add(instruction.address.toString());
+                        executionBlockAddresses.add(instruction.address.toString());
 
                         iterator.putCallout(<(context: PortableCpuContext) => void>onHitInstruction);
 
@@ -360,7 +372,7 @@ function _formatInstructionDetails(instruction: Instruction, context: PortableCp
 function onHitInstruction(context: PortableCpuContext, address: NativePointer): void {
     address = address || context.pc;
 
-    if (!executionBlock.has(address.toString())) {
+    if (!executionBlockAddresses.has(address.toString())) {
         console.log('stalker hit invalid instruction :\'(');
         detach();
         return;
@@ -390,5 +402,5 @@ function onHitInstruction(context: PortableCpuContext, address: NativePointer): 
         onInstructionCallback.apply({}, [ctx]);
     }
 
-    executionBlock.delete(address.toString());
+    executionBlockAddresses.delete(address.toString());
 }
