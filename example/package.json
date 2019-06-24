@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Hooah playground",
   "private": true,
+  "license": "LICENSE.md",
   "main": "agent/index.ts",
   "scripts": {
     "prepare": "npm run build",

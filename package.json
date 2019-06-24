@@ -4,6 +4,7 @@
   "description": "Instruction tracing with frida",
   "main": "./dist",
   "types": "./dist/index.d.ts",
+  "license": "LICENSE.md",
   "files": [
     "/dist/"
   ],

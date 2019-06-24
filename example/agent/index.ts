@@ -14,37 +14,34 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/>
  */
-import { HooahTrace } from "hooah-trace";
+import * as htrace from "hooah-trace";
 
-function onHookInstruction() {
+function onHookInstruction(hc: htrace.HooahContext) {
     // use for fun and profit
     // this.context
     // this.instruction
 
-    const mnemonic = this.instruction.mnemonic;
+    const mnemonic = hc.instruction.mnemonic;
     if (mnemonic === 'ldr') {
         // print the instruction with register details
-        this.print(true);
+        hc.print(true);
     } else if (mnemonic === 'stp') {
         // add some notes to stp instructions
-        this.print(false, "stp " + this.context.pc)
+        hc.print(false, "stp " + hc.context.pc)
     } else {
         // print all other instructions with stripped details
-        this.print();
+        hc.print();
     }
 }
 
 const target = Module.findExportByName(null, 'open');
-
-const options = new Map<string, any>();
-// out callback for each instruction
-options.set('callback', onHookInstruction);
-// -1 is endless
-options.set('count', -1);
-// do not trace outside the current range
-options.set('rangeOnly', false);
-// do not trace jumps in excluded modules (i.e libc / libSystem)
-options.set('excludedModules', []);
-
-
-HooahTrace.attach(target, options);
+if (target) {
+    htrace.attach(target, onHookInstruction, {
+        // -1 is endless
+        count: -1,
+        // do not trace outside the current range
+        rangeOnly: false,
+        // do not trace jumps in excluded modules (i.e libc / libSystem)
+        excludedModules: []
+    });
+}
