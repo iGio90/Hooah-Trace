@@ -3,4 +3,5 @@ node_modules
 package-lock.json
 .idea
 compiled_agent.js
+dist
 _att.py

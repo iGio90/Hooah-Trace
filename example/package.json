@@ -3,18 +3,19 @@
   "version": "1.0.0",
   "description": "Hooah playground",
   "private": true,
-  "main": "agent.js",
+  "main": "agent/index.ts",
   "scripts": {
     "prepare": "npm run build",
-    "build": "frida-compile agent -o compiled_agent.js",
-    "watch": "frida-compile agent -o compiled_agent.js -w"
+    "build": "frida-compile agent/index.ts -o _agent.js",
+    "watch": "frida-compile agent/index.ts -o _agent.js -w"
   },
-  "dependencies": {
-    "@babel/core": "^7.1.2",
-    "@babel/plugin-transform-runtime": "^7.1.0",
-    "@babel/preset-env": "^7.1.0",
-    "@babel/runtime-corejs2": "^7.1.2",
-    "frida-compile": "^8.0.0",
-    "hooah-trace": "^1.0.0"
+  "devDependencies": {
+    "@babel/core": "^7.4.5",
+    "@babel/plugin-transform-runtime": "^7.4.4",
+    "@babel/preset-env": "^7.4.5",
+    "@babel/runtime-corejs2": "^7.4.5",
+    "@types/frida-gum": "^13.0.0",
+    "@types/node": "^12.0.4",
+    "frida-compile": "^8.0.4"
   }
 }

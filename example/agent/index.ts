@@ -14,7 +14,7 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/>
  */
-const hooah = require('hooah-trace');
+import { HooahTrace } from "hooah-trace";
 
 function onHookInstruction() {
     // use for fun and profit
@@ -35,15 +35,16 @@ function onHookInstruction() {
 }
 
 const target = Module.findExportByName(null, 'open');
-const options = {
-    // out callback for each instruction
-    callback: onHookInstruction,
-    // -1 is endless
-    count: -1,
-    // do not trace outside the current range
-    rangeOnly: false,
-    // do not trace jumps in excluded modules (i.e libc / libSystem)
-    excludedModules: []
-};
 
-hooah.attach(target, options);
+const options = new Map<string, any>();
+// out callback for each instruction
+options.set('callback', onHookInstruction);
+// -1 is endless
+options.set('count', -1);
+// do not trace outside the current range
+options.set('rangeOnly', false);
+// do not trace jumps in excluded modules (i.e libc / libSystem)
+options.set('excludedModules', []);
+
+
+HooahTrace.attach(target, options);
