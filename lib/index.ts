@@ -1,5 +1,4 @@
 import * as OnLoadInterceptor from "frida-onload"
-import {doesNotReject} from "assert";
 
 
 interface AnyCpuContext extends PortableCpuContext {
