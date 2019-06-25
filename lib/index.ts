@@ -9,6 +9,7 @@ export interface HooahPrintOptions {
     colored?: boolean | undefined;
     details?: boolean | undefined;
     annotation?: string | undefined;
+    treeSpace?: number | undefined;
 }
 
 interface HooahOptions {
@@ -36,6 +37,7 @@ const _highlight_off = '\x1b[0;23m';
 const _resetColor = '\x1b[0m';
 
 const executionBlockAddresses = new Set<string>();
+const treeTrace: NativePointer[] = [];
 let targetTid = 0;
 let onInstructionCallback: HooahCallback | null = null;
 let moduleMap = new ModuleMap();
@@ -86,6 +88,7 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
             transform: function (iterator: StalkerArm64Iterator | StalkerX86Iterator) {
                 let instruction: Arm64Instruction | X86Instruction | null;
                 let skipWholeBlock = false;
+                let blockEnter = true;
 
                 while ((instruction = iterator.next()) !== null) {
                     if (skipWholeBlock) {
@@ -105,6 +108,19 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
                             continue;
                         }
 
+                        if (blockEnter) {
+                            let treeLength = treeTrace.length;
+                            if (treeTrace.length > 0) {
+                                if (instruction.address.compare(treeLength - 1) == 0) {
+                                    treeTrace.pop();
+                                } else {
+                                    treeTrace.push(ptr(instruction.address.toString()));
+                                }
+                            } else {
+                                treeTrace.push(ptr(instruction.address.toString()));
+                            }
+                        }
+
                         executionBlockAddresses.add(instruction.address.toString());
                         iterator.putCallout(<(context: PortableCpuContext) => void>onHitInstruction);
 
@@ -114,6 +130,10 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
                                 detach();
                             }
                         }
+                    }
+
+                    if (blockEnter) {
+                        blockEnter = false;
                     }
 
                     iterator.keep();
@@ -188,11 +208,16 @@ function colorify(what: string, pat:string): string {
 }
 
 function formatInstruction(
-    address: NativePointer, instruction: Instruction, details: boolean, annotation: string,
-    colored: boolean): string {
+    context: PortableCpuContext,
+    address: NativePointer,
+    instruction: Instruction,
+    details: boolean,
+    annotation: string,
+    colored: boolean,
+    treeSpace: number): string {
 
-    let line = address.toString();
-    let coloredLine = colorify(address.toString(), 'red bold');
+    let line = "";
+    let coloredLine = "";
     let part: string;
 
     const append = function(what: string, color: string | null): void {
@@ -219,6 +244,12 @@ function formatInstruction(
             append(part, null);
         }
     };
+
+    if (treeSpace > 0 && treeTrace.length > 0) {
+        append(getSpacer((treeTrace.length - 1) * treeSpace), null);
+    }
+
+    append(address.toString(), 'red bold');
 
     appendModuleInfo(address);
     append(getSpacer(60 - line.length), null);
@@ -253,13 +284,21 @@ function formatInstruction(
         append('@' + annotation, 'pink');
     }
 
+    if (details) {
+        part = formatInstructionDetails(context, instruction, colored, treeSpace);
+    }
+
     if (colored) {
         return coloredLine;
     }
     return line;
 }
 
-function formatInstructionDetails(instruction: Instruction, context: PortableCpuContext, colored: boolean): string {
+function formatInstructionDetails(
+    context: PortableCpuContext,
+    instruction: Instruction,
+    colored: boolean,
+    treeSpace: number): string {
     const anyContext = context as AnyCpuContext;
     const data: any[] = [];
     const visited: Set<string> = new Set<string>();
@@ -320,7 +359,11 @@ function formatInstructionDetails(instruction: Instruction, context: PortableCpu
         if (lines.length > 0) {
             lines[lines.length - 1] += '\n';
         }
-        let line = spacer + '|------------------------>' + spacer;
+        let line = "";
+        if (treeTrace.length > 0) {
+            line += getSpacer((treeTrace.length - 1) * treeSpace);
+        }
+        line += spacer + '|------------------------>' + spacer;
         line += _applyColor(row[0], 'blue bold') + ' = ' + _applyColor(row[1], 'filter');
         if (row.length > 2 && row[2] !== null) {
             if (row[2].length === 0) {
@@ -397,17 +440,16 @@ function onHitInstruction(context: PortableCpuContext, address: NativePointer): 
         const ctx: HooahContext = {
             context: context,
             instruction: instruction,
-            print(params: HooahPrintOptions = {}): void {
-                const { details = false, colored = false, annotation = "" } = params;
+            print(params: HooahPrintOptions): void {
+                const { details = false, colored = false, annotation = "", treeSpace = 0 } = params;
 
                 if (instruction) {
-                    console.log(formatInstruction(address, instruction, details, annotation, colored));
-                    if (details) {
-                        console.log(formatInstructionDetails(instruction, context, colored))
-                    }
+                    let line = formatInstruction(
+                        context, address, instruction, details, annotation, colored, treeSpace);
                     if (isJumpInstruction(instruction)) {
-                        console.log('');
+                        line += '\n'
                     }
+                    console.log(line);
                 }
             }
         };
