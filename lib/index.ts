@@ -143,8 +143,7 @@ export function detach(): void {
 
 function applyColorFilters(text: string): string {
     text = text.toString();
-    //text = text.replace(/(\W)([a-z]{1,2}\d{0,2})(\W|$)/gm, "$1" + colorify("$2", 'blue') + "$3");
-    text = text.replace(/(\W|^)([a-z]{1,3}\d{0,2})(\W|$)/gm, "$1" + colorify("$2", 'blue') + "$3");
+    text = text.replace(/(\W|^)([a-z]{1,4}\d{0,2})(\W|$)/gm, "$1" + colorify("$2", 'blue') + "$3");
     text = text.replace(/(0x[0123456789abcdef]+)/gm, colorify("$1", 'red'));
     text = text.replace(/#(\d+)/gm, "#" + colorify("$1", 'red'));
     return text;
@@ -183,7 +182,7 @@ function colorify(what: string, pat:string): string {
         ret += _cyan
     }
     if (pat.indexOf('bold') >= 0) {
-        ret += _bold + ' ';
+        ret += _bold;
     } else if (pat.indexOf('highlight') >= 0) {
         ret += _highlight;
     }
@@ -210,6 +209,7 @@ function formatInstruction(
     let coloredLine = "";
     let part: string;
     let intTreeSpace = 0;
+    let spaceAtOpStr: number;
 
     const append = function(what: string, color: string | null): void {
         line += what;
@@ -226,7 +226,7 @@ function formatInstruction(
         const module = moduleMap.find(address);
         if (module !== null) {
             append(' (', null);
-            append(module.name, 'green');
+            append(module.name, 'green bold');
             part = '#';
             append(part, null);
             part = address.sub(module.base).toString();
@@ -267,6 +267,7 @@ function formatInstruction(
     append(instruction.mnemonic, 'green bold');
 
     addSpace(80);
+    spaceAtOpStr = line.length;
     append(instruction.opStr, 'filter');
 
     if (isJumpInstruction(instruction)) {
@@ -283,7 +284,7 @@ function formatInstruction(
     }
 
     if (details) {
-        part = formatInstructionDetails(context, instruction, colored, treeSpace);
+        part = formatInstructionDetails(spaceAtOpStr, context, instruction, colored, treeSpace);
         if (part.length > 0) {
             append('\n' + part, null);
         }
@@ -296,6 +297,7 @@ function formatInstruction(
 }
 
 function formatInstructionDetails(
+    spaceAtOpStr: number,
     context: PortableCpuContext,
     instruction: Instruction,
     colored: boolean,
@@ -348,7 +350,6 @@ function formatInstructionDetails(
     }
 
     let lines: string[] = [];
-    let spacer = getSpacer((instruction.address.toString().length / 2));
     const _applyColor = function(what: string, color: string | null): string {
         if (colored && color) {
             what = colorify(what, color);
@@ -360,17 +361,12 @@ function formatInstructionDetails(
         if (lines.length > 0) {
             lines[lines.length - 1] += '\n';
         }
-        let line = "";
-        if (treeTrace.length > 0) {
-            line += getSpacer((treeTrace.length) * treeSpace);
-        }
-        line += spacer + '|------------------------>' + spacer;
-        line += _applyColor(row[0], 'blue bold') + ' = ' + _applyColor(row[1], 'filter');
+        let line = getSpacer(spaceAtOpStr);
+        line += _applyColor(row[0], 'blue') + ' = ' + _applyColor(row[1], 'filter');
         if (row.length > 2 && row[2] !== null) {
-            if (row[2].length === 0) {
-                line += ' >> ' + _applyColor('0x0', 'red');
-            } else {
-                line += ' >> ' + _applyColor(row[2], 'filter');
+            let part: string = row[2];
+            if (part.length > 0) {
+                line += ' >> ' + row[2];
             }
         }
         lines.push(line);
@@ -383,14 +379,7 @@ function formatInstructionDetails(
     return ret;
 }
 
-function getTelescope(address: NativePointer, isJumpInstruction: boolean) {
-    let telescope;
-    try {
-        telescope = address.readPointer();
-    } catch (e) {
-        return null;
-    }
-
+function getTelescope(address: NativePointer, isJumpInstruction: boolean): string {
     if (isJumpInstruction) {
         try {
             const instruction = Instruction.parse(address);
@@ -398,20 +387,28 @@ function getTelescope(address: NativePointer, isJumpInstruction: boolean) {
             ret += getSpacer(2) + '(';
             return ret + ')';
         } catch (e) {
-            return null;
+            return "";
         }
     } else {
         try {
-            let result: string | null = address.readUtf8String();
-            if (result !== null) {
-                return result.replace('\n', ' ');
+            let asLong = address.readU64().toNumber();
+            let result: string;
+            if (asLong < 0x10000) {
+                result = colorify('0x' + asLong, 'cyan bold')
+            } else {
+                result = colorify('0x' + address.readULong().toString(16), 'red');
+                try {
+                    let str = address.readUtf8String();
+                    if (str && str.length > 0) {
+                        result += ' (' + colorify(str.replace('\n', ' '), 'green bold') + ')'
+                    }
+                } catch (e) {}
             }
+            return result
         } catch (e) {
-            return telescope;
+            return "";
         }
     }
-
-    return null;
 }
 
 function getJumpInstruction(instruction: Instruction, context: AnyCpuContext): Instruction | null {
