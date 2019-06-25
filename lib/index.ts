@@ -244,6 +244,7 @@ function formatInstruction(
     append(instruction.opStr, 'filter');
 
     if (isJumpInstruction(instruction)) {
+        appendModuleInfo(instruction.address)
     }
 
     if (typeof annotation !== 'undefined' && annotation !== '') {
@@ -375,10 +376,6 @@ function getSpacer(space: number): string {
         line += ' ';
     }
     return line;
-}
-
-function isAddressInRange(address: NativePointer, range: RangeDetails): boolean {
-    return address.compare(range.base) >= 0 && address.compare(range.base.add(range.size)) < 0;
 }
 
 function isJumpInstruction(instruction: Instruction): boolean {
