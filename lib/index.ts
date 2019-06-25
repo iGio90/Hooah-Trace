@@ -160,11 +160,6 @@ function colorify(what: string, pat:string): string {
         return applyColorFilters(what);
     }
     let ret = '';
-    if (pat.indexOf('bold') >= 0) {
-        ret += _bold + ' ';
-    } else if (pat.indexOf('highlight') >= 0) {
-        ret += _highlight;
-    }
     if (pat.indexOf('red') >= 0) {
         ret += _red;
     } else if (pat.indexOf('green') >= 0) {
@@ -177,6 +172,11 @@ function colorify(what: string, pat:string): string {
         ret += _pink;
     } else if (pat.indexOf('cyan') >= 0) {
         ret += _cyan
+    }
+    if (pat.indexOf('bold') >= 0) {
+        ret += _bold + ' ';
+    } else if (pat.indexOf('highlight') >= 0) {
+        ret += _highlight;
     }
 
     ret += what;
@@ -192,11 +192,10 @@ function formatInstruction(
     colored: boolean): string {
 
     let line = address.toString();
-    let coloredLine = colorify(address.toString(), 'red');
+    let coloredLine = colorify(address.toString(), 'red bold');
     let part: string;
-    const fourSpace = getSpacer(4);
 
-    const append = function(what: string, color: string | null) {
+    const append = function(what: string, color: string | null): void {
         line += what;
         if (colored) {
             if (color) {
@@ -207,7 +206,22 @@ function formatInstruction(
         }
     };
 
-    append(fourSpace, null);
+    const appendModuleInfo = function(address: NativePointer): void{
+        const module = moduleMap.find(address);
+        if (module !== null) {
+            append(' (', null);
+            append(module.name, 'green');
+            part = '#';
+            append(part, null);
+            part = address.sub(module.base).toString();
+            append(part, 'red');
+            part = ')';
+            append(part, null);
+        }
+    };
+
+    appendModuleInfo(address);
+    append(getSpacer(60 - line.length), null);
 
     const bytes = instruction.address.readByteArray(instruction.size);
     if (bytes) {
@@ -221,31 +235,19 @@ function formatInstruction(
         append(_fix, 'yellow');
     }
 
-    part = getSpacer(28 - line.length);
-    append(part, null);
+    append(getSpacer(70 - line.length), null);
 
-    append(instruction.mnemonic, 'green');
+    append(instruction.mnemonic, 'green bold');
 
-    part = getSpacer(35 - line.length);
-    append(part, null);
+    append(getSpacer(80 - line.length), null);
 
     append(instruction.opStr, 'filter');
 
     if (isJumpInstruction(instruction)) {
-        const module = moduleMap.find(address);
-        if (module !== null) {
-            append(fourSpace + '(', null);
-
-            append(module.name, null);
-
-            part = '#' + address.sub(module.base) + ')';
-            append(part, null);
-        }
     }
 
     if (typeof annotation !== 'undefined' && annotation !== '') {
-        part = getSpacer(65 - line.length);
-        append(part, null);
+        append(getSpacer(90 - line.length), null);
 
         append('@' + annotation, 'pink');
     }
@@ -305,7 +307,7 @@ function formatInstructionDetails(instruction: Instruction, context: PortableCpu
     }
 
     let lines: string[] = [];
-    let spacer = getSpacer((instruction.address.toString().length / 2) - 1);
+    let spacer = getSpacer((instruction.address.toString().length / 2));
     const _applyColor = function(what: string, color: string | null): string {
         if (colored && color) {
             what = colorify(what, color);
@@ -317,8 +319,8 @@ function formatInstructionDetails(instruction: Instruction, context: PortableCpu
         if (lines.length > 0) {
             lines[lines.length - 1] += '\n';
         }
-        let line = spacer + '|---------' + spacer;
-        line += _applyColor(row[0], 'blue') + ' = ' + _applyColor(row[1], 'filter');
+        let line = spacer + '|------------------------>' + spacer;
+        line += _applyColor(row[0], 'blue bold') + ' = ' + _applyColor(row[1], 'filter');
         if (row.length > 2 && row[2] !== null) {
             if (row[2].length === 0) {
                 line += ' >> ' + _applyColor('0x0', 'red');
