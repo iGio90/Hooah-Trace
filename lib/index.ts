@@ -9,7 +9,7 @@ export interface HooahPrintOptions {
     colored?: boolean | undefined;
     details?: boolean | undefined;
     annotation?: string | undefined;
-    treeSpace?: number | undefined;
+    treeSpaces?: number | undefined;
 }
 
 interface HooahOptions {
@@ -36,8 +36,11 @@ const _highlight = '\x1b[0;3m';
 const _highlight_off = '\x1b[0;23m';
 const _resetColor = '\x1b[0m';
 
-const executionBlockAddresses = new Set<string>();
-const treeTrace: NativePointer[] = [];
+const callMnemonics = ['call', 'bl', 'blx', 'blr', 'bx'];
+
+let executionBlockAddresses: string[] = [];
+let executionBlockSize = 0;
+let treeTrace: NativePointer[] = [];
 let targetTid = 0;
 let onInstructionCallback: HooahCallback | null = null;
 let moduleMap = new ModuleMap();
@@ -88,7 +91,6 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
             transform: function (iterator: StalkerArm64Iterator | StalkerX86Iterator) {
                 let instruction: Arm64Instruction | X86Instruction | null;
                 let skipWholeBlock = false;
-                let blockEnter = true;
 
                 while ((instruction = iterator.next()) !== null) {
                     if (skipWholeBlock) {
@@ -108,20 +110,8 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
                             continue;
                         }
 
-                        if (blockEnter) {
-                            let treeLength = treeTrace.length;
-                            if (treeTrace.length > 0) {
-                                if (instruction.address.compare(treeLength - 1) == 0) {
-                                    treeTrace.pop();
-                                } else {
-                                    treeTrace.push(ptr(instruction.address.toString()));
-                                }
-                            } else {
-                                treeTrace.push(ptr(instruction.address.toString()));
-                            }
-                        }
-
-                        executionBlockAddresses.add(instruction.address.toString());
+                        executionBlockAddresses.push(instruction.address.toString());
+                        executionBlockSize = executionBlockAddresses.length;
                         iterator.putCallout(<(context: PortableCpuContext) => void>onHitInstruction);
 
                         if (count > 0) {
@@ -130,10 +120,6 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
                                 detach();
                             }
                         }
-                    }
-
-                    if (blockEnter) {
-                        blockEnter = false;
                     }
 
                     iterator.keep();
@@ -149,6 +135,9 @@ export function detach(): void {
     Stalker.unfollow(targetTid);
     OnLoadInterceptor.detach();
     filtersModuleMap = null;
+    onInstructionCallback = null;
+    executionBlockAddresses = [];
+    treeTrace = [];
     targetTid = 0;
 }
 
@@ -216,9 +205,11 @@ function formatInstruction(
     colored: boolean,
     treeSpace: number): string {
 
+    const anyCtx = context as AnyCpuContext;
     let line = "";
     let coloredLine = "";
     let part: string;
+    let intTreeSpace = 0;
 
     const append = function(what: string, color: string | null): void {
         line += what;
@@ -231,7 +222,7 @@ function formatInstruction(
         }
     };
 
-    const appendModuleInfo = function(address: NativePointer): void{
+    const appendModuleInfo = function(address: NativePointer): void {
         const module = moduleMap.find(address);
         if (module !== null) {
             append(' (', null);
@@ -245,14 +236,19 @@ function formatInstruction(
         }
     };
 
+    const addSpace = function(count: number): void {
+        append(getSpacer(count + intTreeSpace - line.length), null);
+    };
+
     if (treeSpace > 0 && treeTrace.length > 0) {
-        append(getSpacer((treeTrace.length - 1) * treeSpace), null);
+        intTreeSpace = (treeTrace.length) * treeSpace;
+        append(getSpacer(intTreeSpace), null);
     }
 
     append(address.toString(), 'red bold');
 
     appendModuleInfo(address);
-    append(getSpacer(60 - line.length), null);
+    addSpace(60);
 
     const bytes = instruction.address.readByteArray(instruction.size);
     if (bytes) {
@@ -266,26 +262,31 @@ function formatInstruction(
         append(_fix, 'yellow');
     }
 
-    append(getSpacer(70 - line.length), null);
+    addSpace(70);
 
     append(instruction.mnemonic, 'green bold');
 
-    append(getSpacer(80 - line.length), null);
-
+    addSpace(80);
     append(instruction.opStr, 'filter');
 
     if (isJumpInstruction(instruction)) {
-        appendModuleInfo(instruction.address)
+        let jumpInsn = getJumpInstruction(instruction, anyCtx);
+        if (jumpInsn) {
+            appendModuleInfo(jumpInsn.address);
+        }
     }
 
     if (typeof annotation !== 'undefined' && annotation !== '') {
-        append(getSpacer(90 - line.length), null);
+        addSpace(90);
 
         append('@' + annotation, 'pink');
     }
 
     if (details) {
         part = formatInstructionDetails(context, instruction, colored, treeSpace);
+        if (part.length > 0) {
+            append('\n' + part, null);
+        }
     }
 
     if (colored) {
@@ -361,7 +362,7 @@ function formatInstructionDetails(
         }
         let line = "";
         if (treeTrace.length > 0) {
-            line += getSpacer((treeTrace.length - 1) * treeSpace);
+            line += getSpacer((treeTrace.length) * treeSpace);
         }
         line += spacer + '|------------------------>' + spacer;
         line += _applyColor(row[0], 'blue bold') + ' = ' + _applyColor(row[1], 'filter');
@@ -413,6 +414,27 @@ function getTelescope(address: NativePointer, isJumpInstruction: boolean) {
     return null;
 }
 
+function getJumpInstruction(instruction: Instruction, context: AnyCpuContext): Instruction | null {
+    let insn: Arm64Instruction | X86Instruction | null = null;
+    if (Process.arch === 'arm64') {
+        insn = instruction as Arm64Instruction;
+    } else if (Process.arch === 'ia32' || Process.arch === 'x64') {
+        insn = instruction as X86Instruction;
+    }
+    if (insn) {
+        if (isJumpInstruction(instruction)) {
+            const lastOp = insn.operands[insn.operands.length - 1];
+            switch (lastOp.type) {
+                case "reg":
+                    return Instruction.parse(context[lastOp.value]);
+                case "imm":
+                    return Instruction.parse(ptr(lastOp.value.toString()))
+            }
+        }
+    }
+    return null;
+}
+
 function getSpacer(space: number): string {
     let line = '';
     for (let i=0;i<space;i++) {
@@ -421,32 +443,55 @@ function getSpacer(space: number): string {
     return line;
 }
 
+function isCallInstruction(instruction: Instruction) {
+    return callMnemonics.indexOf(instruction.mnemonic) >= 0;
+}
+
 function isJumpInstruction(instruction: Instruction): boolean {
     return instruction.groups.indexOf('jump') >= 0 || instruction.groups.indexOf('ret') >= 0;
+}
+
+function isRetInstruction(instuction: Instruction) {
+    return instuction.groups.indexOf('return') >= 0;
 }
 
 function onHitInstruction(context: PortableCpuContext, address: NativePointer): void {
     address = address || context.pc;
 
-    if (!executionBlockAddresses.has(address.toString())) {
+    if (executionBlockAddresses.indexOf(address.toString()) < 0) {
         console.log('stalker hit invalid instruction :\'(');
         detach();
         return;
     }
 
     const instruction: Instruction = Instruction.parse(address);
+    const blockSize = executionBlockAddresses.length;
+    const treeTraceLength = treeTrace.length;
 
     if (onInstructionCallback !== null) {
+        if (blockSize === executionBlockSize) {
+            // first instruction of the block
+            if (treeTraceLength > 0) {
+                if (instruction.address.compare(treeTrace[treeTraceLength - 1]) === 0) {
+                    treeTrace.pop();
+                }
+            }
+        }
+
         const ctx: HooahContext = {
             context: context,
             instruction: instruction,
             print(params: HooahPrintOptions): void {
-                const { details = false, colored = false, annotation = "", treeSpace = 0 } = params;
+                let { details = false, colored = false, annotation = "", treeSpaces = 0 } = params;
+
+                if (treeSpaces > 0 && treeSpaces < 4) {
+                    treeSpaces = 4;
+                }
 
                 if (instruction) {
                     let line = formatInstruction(
-                        context, address, instruction, details, annotation, colored, treeSpace);
-                    if (isJumpInstruction(instruction)) {
+                        context, address, instruction, details, annotation, colored, treeSpaces);
+                    if (isJumpInstruction(instruction) || isRetInstruction(instruction)) {
                         line += '\n'
                     }
                     console.log(line);
@@ -455,11 +500,14 @@ function onHitInstruction(context: PortableCpuContext, address: NativePointer): 
         };
 
         onInstructionCallback.apply({}, [ctx]);
+
+        if (blockSize === 1) {
+            // last instruction of the block
+            if (isCallInstruction(instruction)) {
+                treeTrace.push(instruction.next);
+            }
+        }
     }
 
-    executionBlockAddresses.delete(address.toString());
-}
-
-function uncoloredStringLength(text: string): number {
-    return text.replace(/\x1b\[(0;)?\d+m/gm, "").length;
+    executionBlockAddresses.shift();
 }

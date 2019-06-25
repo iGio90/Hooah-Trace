@@ -78,19 +78,6 @@ if (target) {
 
 ### example output
 ```$xslt
-0x732ebbe774    f65701a9      stp            x22, x21, [sp, #0x10]
-0x732ebbe778    f44f02a9      stp            x20, x19, [sp, #0x20]
-0x732ebbe77c    fd7b03a9      stp            x29, x30, [sp, #0x30]
-0x732ebbe780    fdc30091      add            x29, sp, #0x30
-0x732ebbe784    a00300b0      adrp           x0, #0x732ec33000
-0x732ebbe788    00601791      add            x0, x0, #0x5d8
-0x732eb5c858    b00600b0      adrp           x16, #0x732ec31000
-0x732eb5c85c    11d640f9      ldr            x17, [x16, #0x1a8]
-0x732eb5c860    10a20691      add            x16, x16, #0x1a8
-0x732ebc6de0    f30f1ef8      str            x19, [sp, #-0x20]!
-0x732ebc6de4    fd7b01a9      stp            x29, x30, [sp, #0x10]
-0x732ebc6de8    fd430091      add            x29, sp, #0x10
-0x732ebc6dec    f30300aa      mov            x19, x0
 0x732ebc6df0    68024079      ldrh           w8, [x19]
 0x732ebc6df4    003d0012      and            w0, w8, #0xffff
 0x732ebc6df8    1f051272      tst            w8, #0xc000
@@ -143,6 +130,23 @@ jumping to range 0x72496d3000 >> /data/app/com.target/lib/arm64/libtarget.so
 0x7249b47c6c    fd430191    add      x29, sp, #0x50
      |---------     fp = 0x7249505490 >> 0x72495054b0
      |---------     sp = 0x7249505420 >> 0x72496cda5c
+```
+
+### example output with treeSpaces
+
+```
+             0x732eb5fda0 (libc.so#0x1dda0)                              0004803d   str       q0, [x0, #0x10]
+             0x732eb5fda4 (libc.so#0x1dda4)                              000001ad   stp       q0, q0, [x0, #0x20]
+             0x732eb5fda8 (libc.so#0x1dda8)                              80003fad   stp       q0, q0, [x4, #-0x20]
+             0x732eb5fdac (libc.so#0x1ddac)                              c0035fd6   ret       
+
+       0x722576555c (libg.so#0x42155c)                             e0031d32   orr       w0, wzr, #8
+       0x7225765560 (libg.so#0x421560)                             02bb1194   bl        #0x7225bd4168 (libg.so#0x890168)
+
+             0x7225bd4168 (libg.so#0x890168)                             f30f1ef8   str       x19, [sp, #-0x20]!
+             0x7225bd416c (libg.so#0x89016c)                             fd7b01a9   stp       x29, x30, [sp, #0x10]
+             0x7225bd4170 (libg.so#0x890170)                             fd430091   add       x29, sp, #0x10
+             0x7225bd4174 (libg.so#0x890174)                             1f0000f1   cmp       x0, #0
 ```
 
 ---

@@ -18,6 +18,9 @@ function onHookInstruction(hc: hooah.HooahContext) {
     // yes please
     printOptions.colored = true;
 
+    // add some spaces to highlight calls/ret
+    printOptions.treeSoaces = 4;
+
     if (mnemonic === 'ldr') {
         // print the instruction with register details
         printOptions.details = true;
