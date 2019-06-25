@@ -38,7 +38,8 @@ const _resetColor = '\x1b[0m';
 const executionBlockAddresses = new Set<string>();
 let targetTid = 0;
 let onInstructionCallback: HooahCallback | null = null;
-let moduleMap: ModuleMap | null = null;
+let moduleMap = new ModuleMap();
+let filtersModuleMap: ModuleMap | null = null;
 
 export function attach(target: NativePointer, callback: HooahCallback, params: HooahOptions = {}) {
     if (targetTid > 0) {
@@ -59,8 +60,9 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
         onInstructionCallback = callback;
 
         const startPc = this.context.pc;
-        const startModule: Module | null = Process.findModuleByAddress(target);
-        moduleMap = new ModuleMap(module => {
+
+        moduleMap.update();
+        filtersModuleMap = new ModuleMap(module => {
             let found = false;
             filterModules.forEach(filter => {
                if (module.name.indexOf(filter) >= 0) {
@@ -71,8 +73,9 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
         });
 
         OnLoadInterceptor.attach((name: string, base: NativePointer) => {
-            if (moduleMap) {
-                moduleMap.update();
+            moduleMap.update();
+            if (filtersModuleMap) {
+                filtersModuleMap.update();
             }
         });
 
@@ -81,7 +84,6 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
 
         Stalker.follow(targetTid, {
             transform: function (iterator: StalkerArm64Iterator | StalkerX86Iterator) {
-                let range: RangeDetails | null | undefined;
                 let instruction: Arm64Instruction | X86Instruction | null;
                 let skipWholeBlock = false;
 
@@ -92,13 +94,13 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
 
                     if (inTrampoline) {
                         const testAddress = instruction.address.sub(startPc).compare(0x30);
-                        if (testAddress > 0 && testAddress < 0x30) {
+                        if (testAddress < 0) {
                             inTrampoline = false;
                         }
                     }
 
                     if (!inTrampoline) {
-                        if (moduleMap && moduleMap.has(instruction.address)) {
+                        if (filtersModuleMap && filtersModuleMap.has(instruction.address)) {
                             skipWholeBlock = true;
                             continue;
                         }
@@ -126,7 +128,7 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
 export function detach(): void {
     Stalker.unfollow(targetTid);
     OnLoadInterceptor.detach();
-    moduleMap = null;
+    filtersModuleMap = null;
     targetTid = 0;
 }
 
@@ -229,17 +231,15 @@ function formatInstruction(
 
     append(instruction.opStr, 'filter');
 
-    if (isJumpInstruction(instruction) && !details) {
-        if (moduleMap) {
-            const module = moduleMap.find(address);
-            if (module !== null) {
-                append(fourSpace + '(', null);
+    if (isJumpInstruction(instruction)) {
+        const module = moduleMap.find(address);
+        if (module !== null) {
+            append(fourSpace + '(', null);
 
-                append(module.name, null);
+            append(module.name, null);
 
-                part = '#' + address.sub(module.base) + ')';
-                append(part, null);
-            }
+            part = '#' + address.sub(module.base) + ')';
+            append(part, null);
         }
     }
 
@@ -337,36 +337,33 @@ function formatInstructionDetails(instruction: Instruction, context: PortableCpu
 }
 
 function getTelescope(address: NativePointer, isJumpInstruction: boolean) {
-    let range = Process.findRangeByAddress(address);
-    if (range !== null) {
-        if (isJumpInstruction) {
-            try {
-                const instruction = Instruction.parse(address);
-                let ret = colorify(instruction.mnemonic, 'green') + ' ' + applyColorFilters(instruction.opStr);
-                ret += getSpacer(2) + '(';
-                if (typeof range.file !== 'undefined') {
-                    let parts = range.file.path.split('/');
-                    ret += parts[parts.length - 1];
-                }
-                ret += '#' + address.sub(range.base);
-                return ret + ')';
-            } catch (e) {
-                return null;
+    let telescope;
+    try {
+        telescope = address.readPointer();
+    } catch (e) {
+        return null;
+    }
+
+    if (isJumpInstruction) {
+        try {
+            const instruction = Instruction.parse(address);
+            let ret = colorify(instruction.mnemonic, 'green') + ' ' + applyColorFilters(instruction.opStr);
+            ret += getSpacer(2) + '(';
+            return ret + ')';
+        } catch (e) {
+            return null;
+        }
+    } else {
+        try {
+            let result: string | null = address.readUtf8String();
+            if (result !== null) {
+                return result.replace('\n', ' ');
             }
-        } else {
-            try {
-                let result: string | null = address.readUtf8String();
-                if (result !== null) {
-                    return result.replace('\n', ' ');
-                }
-            } catch (e) {
-                try {
-                    address = address.readPointer();
-                    return address;
-                } catch (e) {}
-            }
+        } catch (e) {
+            return telescope;
         }
     }
+
     return null;
 }
 
