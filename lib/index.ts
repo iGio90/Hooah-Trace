@@ -1,4 +1,5 @@
 import * as OnLoadInterceptor from "frida-onload"
+import {doesNotReject} from "assert";
 
 
 interface AnyCpuContext extends PortableCpuContext {
@@ -38,8 +39,6 @@ const _resetColor = '\x1b[0m';
 
 const callMnemonics = ['call', 'bl', 'blx', 'blr', 'bx'];
 
-let executionBlockAddresses: string[] = [];
-let executionBlockSize = 0;
 let treeTrace: NativePointer[] = [];
 let targetTid = 0;
 let onInstructionCallback: HooahCallback | null = null;
@@ -90,10 +89,15 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
         Stalker.follow(targetTid, {
             transform: function (iterator: StalkerArm64Iterator | StalkerX86Iterator) {
                 let instruction: Arm64Instruction | X86Instruction | null;
-                let skipWholeBlock = false;
+
+                // prevent blocks with ldaxr instruction for the moment
+                let safeBlockCheck = false;
+
+                let killBlock = false;
 
                 while ((instruction = iterator.next()) !== null) {
-                    if (skipWholeBlock) {
+                    if (killBlock) {
+                        iterator.keep();
                         continue;
                     }
 
@@ -105,20 +109,38 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
                     }
 
                     if (!inTrampoline) {
-                        if (filtersModuleMap && filtersModuleMap.has(instruction.address)) {
-                            skipWholeBlock = true;
-                            continue;
+                        if (!safeBlockCheck) {
+                            safeBlockCheck = true;
+                            let insn: Instruction = instruction;
+                            while (true) {
+                                if (isJumpInstruction(insn)) {
+                                    break;
+                                }
+                                if (insn.mnemonic === 'ldaxr') {
+                                    killBlock = true;
+                                    break;
+                                }
+                                try {
+                                    insn = Instruction.parse(insn.next);
+                                } catch (e) {
+                                    break
+                                }
+                            }
                         }
 
-                        executionBlockAddresses.push(instruction.address.toString());
-                        executionBlockSize = executionBlockAddresses.length;
-                        iterator.putCallout(<(context: PortableCpuContext) => void>onHitInstruction);
+                        if (filtersModuleMap && filtersModuleMap.has(instruction.address)) {
+                            killBlock = true;
+                        }
 
-                        if (count > 0) {
-                            instructionsCount++;
-                            if (instructionsCount === count) {
-                                detach();
-                            }
+                        if (!killBlock) {
+                            iterator.putCallout(<(context: PortableCpuContext) => void>onHitInstruction);
+                        }
+                    }
+
+                    if (count > 0) {
+                        instructionsCount++;
+                        if (instructionsCount === count) {
+                            detach();
                         }
                     }
 
@@ -136,7 +158,6 @@ export function detach(): void {
     OnLoadInterceptor.detach();
     filtersModuleMap = null;
     onInstructionCallback = null;
-    executionBlockAddresses = [];
     treeTrace = [];
     targetTid = 0;
 }
@@ -271,10 +292,12 @@ function formatInstruction(
     append(instruction.opStr, 'filter');
 
     if (isJumpInstruction(instruction)) {
-        let jumpInsn = getJumpInstruction(instruction, anyCtx);
-        if (jumpInsn) {
-            appendModuleInfo(jumpInsn.address);
-        }
+        try {
+            let jumpInsn = getJumpInstruction(instruction, anyCtx);
+            if (jumpInsn) {
+                appendModuleInfo(jumpInsn.address);
+            }
+        } catch (e) {}
     }
 
     if (typeof annotation !== 'undefined' && annotation !== '') {
@@ -383,8 +406,7 @@ function getTelescope(address: NativePointer, isJumpInstruction: boolean): strin
     if (isJumpInstruction) {
         try {
             const instruction = Instruction.parse(address);
-            let ret = colorify(instruction.mnemonic, 'green') + ' ' + applyColorFilters(instruction.opStr);
-            ret += getSpacer(2) + '(';
+            let ret = colorify(instruction.mnemonic, 'green');
             return ret + ')';
         } catch (e) {
             return "";
@@ -455,23 +477,13 @@ function isRetInstruction(instuction: Instruction) {
 function onHitInstruction(context: PortableCpuContext, address: NativePointer): void {
     address = address || context.pc;
 
-    if (executionBlockAddresses.indexOf(address.toString()) < 0) {
-        console.log('stalker hit invalid instruction :\'(');
-        detach();
-        return;
-    }
-
     const instruction: Instruction = Instruction.parse(address);
-    const blockSize = executionBlockAddresses.length;
     const treeTraceLength = treeTrace.length;
 
     if (onInstructionCallback !== null) {
-        if (blockSize === executionBlockSize) {
-            // first instruction of the block
-            if (treeTraceLength > 0) {
-                if (instruction.address.compare(treeTrace[treeTraceLength - 1]) === 0) {
-                    treeTrace.pop();
-                }
+        if (treeTraceLength > 0) {
+            if (instruction.address.compare(treeTrace[treeTraceLength - 1]) === 0) {
+                treeTrace.pop();
             }
         }
 
@@ -489,7 +501,10 @@ function onHitInstruction(context: PortableCpuContext, address: NativePointer): 
                     let line = formatInstruction(
                         context, address, instruction, details, annotation, colored, treeSpaces);
                     if (isJumpInstruction(instruction) || isRetInstruction(instruction)) {
-                        line += '\n'
+                        line += '\n';
+                        if (details) {
+                            line += '\n\n';
+                        }
                     }
                     console.log(line);
                 }
@@ -498,13 +513,8 @@ function onHitInstruction(context: PortableCpuContext, address: NativePointer): 
 
         onInstructionCallback.apply({}, [ctx]);
 
-        if (blockSize === 1) {
-            // last instruction of the block
-            if (isCallInstruction(instruction)) {
-                treeTrace.push(instruction.next);
-            }
+        if (isCallInstruction(instruction)) {
+            treeTrace.push(instruction.next);
         }
     }
-
-    executionBlockAddresses.shift();
 }
