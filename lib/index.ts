@@ -223,14 +223,16 @@ export module HooahTrace {
         }
         console.log(startSpacer + topSep + topMid + topSep);
         currentExecutionBlock.forEach(printInfo => {
-            console.log(emptyLine);
-            if (printInfo.details) {
+            if (details && printInfo.details) {
+                console.log(emptyLine);
                 printInfo.details.forEach(detailPrintInfo => {
                     console.log(formatLine(detailPrintInfo));
                 });
             }
             console.log(formatLine(printInfo));
-            console.log(emptyLine);
+            if (details && printInfo.details) {
+                console.log(emptyLine);
+            }
         });
         console.log(startSpacer + botSep + '|' + botSep);
         sessionPrevSepCount = nextSepCount;
