@@ -28,7 +28,7 @@ if (target) {
                 treeSpaces: 8,
 
                 // include involved register values data
-                details: false
+                details: true
             }
         });
     });

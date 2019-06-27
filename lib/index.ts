@@ -3,6 +3,8 @@ import {Utils} from "./utils";
 import * as OnLoadInterceptor from "frida-onload"
 
 export module HooahTrace {
+    import getSpacer = Utils.getSpacer;
+
     interface AnyCpuContext extends PortableCpuContext {
         [name: string]: NativePointer;
     }
@@ -24,6 +26,12 @@ export module HooahTrace {
         data: string;
         lineLength: number;
         details?: PrintInfo[];
+        postDetails?: PrintInfo[];
+    }
+
+    interface RegisterInfo {
+        reg: string;
+        value: NativePointer;
     }
 
     type HooahCallback = (context: CpuContext, instruction: Instruction) => void;
@@ -34,6 +42,7 @@ export module HooahTrace {
     let moduleMap = new ModuleMap();
     let filtersModuleMap: ModuleMap | null = null;
 
+    const currentExecutionBlockStackRegisters: RegisterInfo[] = [];
     const currentExecutionBlock: PrintInfo[] = [];
     let currentBlockStartWidth = 0;
     let currentBlockMaxWidth = 0;
@@ -101,6 +110,8 @@ export module HooahTrace {
                 let moduleFilterLocker = false;
 
                 while ((instruction = iterator.next()) !== null) {
+                    currentExecutionBlockStackRegisters.length = 0;
+
                     if (moduleFilterLocker) {
                         iterator.keep();
                         continue;
@@ -142,13 +153,14 @@ export module HooahTrace {
         treeTrace.length = 0;
         targetTid = 0;
 
+        currentExecutionBlockStackRegisters.length = 0;
         currentExecutionBlock.length = 0;
         currentBlockMaxWidth = 0;
 
         sessionPrevSepCount = 0;
     }
 
-    function onHitInstruction(context: PortableCpuContext): void {
+    function onHitInstruction(context: AnyCpuContext): void {
         const address = context.pc;
         const instruction: Instruction = Instruction.parse(address);
         const treeTraceLength = treeTrace.length;
@@ -170,8 +182,10 @@ export module HooahTrace {
                 const isJump = Utils.isJumpInstruction(instruction);
                 const isRet = Utils.isRetInstruction(instruction);
 
-                const line = formatInstruction(context, address, instruction, details, colored, treeSpaces, isJump);
-                currentExecutionBlock.push(line);
+                const printInfo = formatInstruction(context, address, instruction,
+                    details, colored, treeSpaces, isJump);
+                currentExecutionBlock.push(printInfo);
+
                 if (isJump || isRet) {
                     if (currentExecutionBlock.length > 0) {
                         blockifyBlock(details);
@@ -230,7 +244,12 @@ export module HooahTrace {
                 });
             }
             console.log(formatLine(printInfo));
-            if (details && printInfo.details) {
+            if (details) {
+                if (printInfo.postDetails) {
+                    printInfo.postDetails.forEach(postPrintInfo => {
+                        console.log(formatLine(postPrintInfo));
+                    })
+                }
                 console.log(emptyLine);
             }
         });
@@ -251,7 +270,7 @@ export module HooahTrace {
     }
 
     function formatInstruction(
-        context: PortableCpuContext,
+        context: AnyCpuContext,
         address: NativePointer,
         instruction: Instruction,
         details: boolean,
@@ -342,6 +361,23 @@ export module HooahTrace {
 
         let detailsData: PrintInfo[] = [];
         if (details) {
+            if (currentExecutionBlockStackRegisters.length > 0) {
+                let postLines: PrintInfo[] = [];
+                currentExecutionBlockStackRegisters.forEach(reg => {
+                    const contextVal = context[reg.reg];
+                    if (contextVal && contextVal.compare(reg.value) !== 0) {
+                        const toStr = contextVal.toString();
+                        const str = getSpacer(spaceAtOpStr) + Color.colorify(reg.reg, 'blue bold') + ' = ' +
+                            Color.colorify(toStr, 'red');
+                        postLines.push({data: str, lineLength: spaceAtOpStr + reg.reg.length + toStr.length + 3})
+                    }
+                });
+                currentExecutionBlockStackRegisters.length = 0;
+                if (currentExecutionBlock.length > 0) {
+                    currentExecutionBlock[currentExecutionBlock.length - 1].postDetails = postLines;
+                }
+            }
+
             detailsData = formatInstructionDetails(spaceAtOpStr, context, instruction, colored, isJump);
             detailsData.forEach(detail => {
                 if (detail.lineLength > currentBlockMaxWidth) {
@@ -350,12 +386,13 @@ export module HooahTrace {
             });
         }
 
-        return {data: colored ? coloredLine : line, lineLength: lineLength, details: detailsData};
+        return {data: colored ? coloredLine : line, lineLength: lineLength,
+            details: detailsData};
     }
 
     function formatInstructionDetails(
         spaceAtOpStr: number,
-        context: PortableCpuContext,
+        context: AnyCpuContext,
         instruction: Instruction,
         colored: boolean,
         isJump: boolean): PrintInfo[] {
@@ -375,8 +412,8 @@ export module HooahTrace {
                 let value = null;
                 let adds = 0;
                 if (op.type === 'mem') {
-                    reg = op.value.base;
                     adds = op.value.disp;
+                    reg = op.value.base;
                 } else if (op.type === 'reg') {
                     reg = op.value;
                 }
@@ -386,8 +423,12 @@ export module HooahTrace {
                     try {
                         value = anyContext[reg];
                         if (typeof value !== 'undefined') {
-                            value = anyContext[reg].add(adds);
-                            data.push([reg, value, getTelescope(value, isJump)]);
+                            currentExecutionBlockStackRegisters.push({
+                                reg: reg.toString(), value: value});
+                            value = anyContext[reg];
+                            let regLabel = reg.toString();
+                            data.push([regLabel, value.toString() + (adds > 0 ? '#' + adds.toString(16) : ''),
+                                getTelescope(value.add(adds), isJump)]);
                         } else {
                             //data.push([reg, 'register not found in context']);
                         }
