@@ -44,7 +44,7 @@ let onInstructionCallback: HooahCallback | null = null;
 let moduleMap = new ModuleMap();
 let filtersModuleMap: ModuleMap | null = null;
 
-export function attach(target: NativePointer, callback: HooahCallback, params: HooahOptions = {}) {
+export function start(callback: HooahCallback, params: HooahOptions = {}) {
     if (targetTid > 0) {
         console.log('Hooah is already tracing thread: ' + targetTid);
         return 1;
@@ -52,109 +52,83 @@ export function attach(target: NativePointer, callback: HooahCallback, params: H
 
     const { count = -1, filterModules = [] } = params;
 
-    const interceptor = Interceptor.attach(target, function () {
-        interceptor.detach();
-        if (targetTid > 0) {
-            console.log('Hooah is already tracing thread: ' + targetTid);
-            return;
+    if (targetTid > 0) {
+        console.log('Hooah is already tracing thread: ' + targetTid);
+        return;
+    }
+
+    targetTid = Process.getCurrentThreadId();
+    onInstructionCallback = callback;
+
+    moduleMap.update();
+    filtersModuleMap = new ModuleMap(module => {
+        // do not follow frida agent
+        if (module.name.indexOf('frida-agent') >= 0) {
+            return true;
         }
 
-        targetTid = Process.getCurrentThreadId();
-        onInstructionCallback = callback;
+        let found = false;
+        filterModules.forEach(filter => {
+            if (module.name.indexOf(filter) >= 0) {
+                found = true;
+            }
+        });
+        return found;
+    });
 
-        const startPc = this.context.pc;
-
+    OnLoadInterceptor.attach((name: string, base: NativePointer) => {
         moduleMap.update();
-        filtersModuleMap = new ModuleMap(module => {
-            let found = false;
-            filterModules.forEach(filter => {
-               if (module.name.indexOf(filter) >= 0) {
-                   found = true;
-               }
-            });
-            return found;
-        });
+        if (filtersModuleMap) {
+            filtersModuleMap.update();
+        }
+    });
 
-        OnLoadInterceptor.attach((name: string, base: NativePointer) => {
-            moduleMap.update();
-            if (filtersModuleMap) {
-                filtersModuleMap.update();
-            }
-        });
+    let instructionsCount = 0;
+    let startAddress = NULL;
 
-        let inTrampoline = true;
-        let instructionsCount = 0;
+    Stalker.follow(targetTid, {
+        transform: function (iterator: StalkerArm64Iterator | StalkerX86Iterator) {
+            let instruction: Arm64Instruction | X86Instruction | null;
+            let moduleFilterLocker = false;
 
-        Stalker.follow(targetTid, {
-            transform: function (iterator: StalkerArm64Iterator | StalkerX86Iterator) {
-                let instruction: Arm64Instruction | X86Instruction | null;
-
-                // prevent blocks with ldaxr instruction for the moment
-                let safeBlockCheck = false;
-
-                let killBlock = false;
-
-                while ((instruction = iterator.next()) !== null) {
-                    if (killBlock) {
-                        iterator.keep();
-                        continue;
-                    }
-
-                    if (inTrampoline) {
-                        const testAddress = instruction.address.sub(startPc).compare(0x30);
-                        if (testAddress < 0) {
-                            inTrampoline = false;
-                        }
-                    }
-
-                    if (!inTrampoline) {
-                        if (!safeBlockCheck) {
-                            safeBlockCheck = true;
-                            let insn: Instruction = instruction;
-                            while (true) {
-                                if (isJumpInstruction(insn)) {
-                                    break;
-                                }
-                                if (insn.mnemonic === 'ldaxr') {
-                                    killBlock = true;
-                                    break;
-                                }
-                                try {
-                                    insn = Instruction.parse(insn.next);
-                                } catch (e) {
-                                    break
-                                }
-                            }
-                        }
-
-                        if (filtersModuleMap && filtersModuleMap.has(instruction.address)) {
-                            killBlock = true;
-                        }
-
-                        if (!killBlock) {
-                            iterator.putCallout(<(context: PortableCpuContext) => void>onHitInstruction);
-                        }
-                    }
-
-                    if (count > 0) {
-                        instructionsCount++;
-                        if (instructionsCount === count) {
-                            detach();
-                        }
-                    }
-
+            while ((instruction = iterator.next()) !== null) {
+                if (moduleFilterLocker) {
                     iterator.keep();
+                    continue;
                 }
+
+                if (filtersModuleMap && filtersModuleMap.has(instruction.address)) {
+                    moduleFilterLocker = true;
+                }
+
+                if (!moduleFilterLocker) {
+
+                    // basically skip the first block of code (from frida)
+                    if (startAddress.compare(NULL) === 0) {
+                        startAddress = instruction.address;
+                        moduleFilterLocker = true;
+                    } else {
+                        iterator.putCallout(<(context: PortableCpuContext) => void>onHitInstruction);
+                    }
+                }
+
+                if (count > 0) {
+                    instructionsCount++;
+                    if (instructionsCount === count) {
+                        stop();
+                    }
+                }
+
+                iterator.keep();
             }
-        });
+        }
     });
 
     return 0;
 }
 
-export function detach(): void {
+export function stop(): void {
     Stalker.unfollow(targetTid);
-    OnLoadInterceptor.detach();
     filtersModuleMap = null;
     onInstructionCallback = null;
     treeTrace = [];
@@ -359,8 +333,7 @@ function formatInstructionDetails(
                     value = anyContext[reg];
                     if (typeof value !== 'undefined') {
                         value = anyContext[reg].add(adds);
-                        data.push([reg, value, getTelescope(value,
-                            isJumpInstruction(instruction))]);
+                        data.push([reg, value, getTelescope(value, isJumpInstruction(instruction))]);
                     } else {
                         //data.push([reg, 'register not found in context']);
                     }

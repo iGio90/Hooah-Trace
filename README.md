@@ -70,11 +70,13 @@ function onHookInstruction(hc: hooah.HooahContext) {
 
 const target = Module.findExportByName(null, 'open');
 if (target) {
-    hooah.attach(target, onHookInstruction, {
-        // -1 is endless
-        count: -1,
-        // do not trace jumps in excluded modules (i.e libc / libSystem)
-        filterModules: ['libc.so']
+    Interceptor.attach(target, function () {
+        hooah.start(onHookInstruction, {
+            // -1 is endless
+            count: -1,
+            // do not trace jumps in excluded modules (i.e libc / libSystem)
+            filterModules: ['libc.so']
+        });
     });
 }
 ```
