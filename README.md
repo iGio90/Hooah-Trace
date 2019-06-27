@@ -69,12 +69,12 @@ if (target) {
 ```
 
 ### example output
-![Alt text](https://raw.githubusercontent.com/iGio90/Hooah-Trace/master/3.PNG "HooahTrace 3")
+![Alt text](https://i.ibb.co/f0ghyFm/3.png "HooahTrace 3")
 
 ### example output with details
-![Alt text](https://raw.githubusercontent.com/iGio90/Hooah-Trace/master/1.PNG "HooahTrace 1")
+![Alt text](https://i.ibb.co/z6FWC9p/1.png "HooahTrace 1")
 
-![Alt text](https://raw.githubusercontent.com/iGio90/Hooah-Trace/master/2.PNG "HooahTrace 2")
+![Alt text](https://i.ibb.co/PW3K41S/2.png "HooahTrace 2")
 
 
 ---
