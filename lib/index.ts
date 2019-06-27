@@ -1,492 +1,493 @@
+import {Color} from "./color";
+import {Utils} from "./utils";
 import * as OnLoadInterceptor from "frida-onload"
 
-
-interface AnyCpuContext extends PortableCpuContext {
-    [name: string]: NativePointer;
-}
-
-export interface HooahPrintOptions {
-    colored?: boolean | undefined;
-    details?: boolean | undefined;
-    annotation?: string | undefined;
-    treeSpaces?: number | undefined;
-}
-
-interface HooahOptions {
-    count?: number | undefined;
-    filterModules?: string[] | undefined;
-}
-
-export interface HooahContext {
-    instruction: Instruction;
-    context: PortableCpuContext;
-    print: Function;
-}
-
-type HooahCallback = (h: HooahContext) => void;
-
-const _red = '\x1b[0;31m';
-const _green = '\x1b[0;32m';
-const _yellow = '\x1b[0;33m';
-const _blue = '\x1b[0;34m';
-const _pink = '\x1b[0;35m';
-const _cyan = '\x1b[0;36m';
-const _bold = '\x1b[0;1m';
-const _highlight = '\x1b[0;3m';
-const _highlight_off = '\x1b[0;23m';
-const _resetColor = '\x1b[0m';
-
-const callMnemonics = ['call', 'bl', 'blx', 'blr', 'bx'];
-
-let treeTrace: NativePointer[] = [];
-let targetTid = 0;
-let onInstructionCallback: HooahCallback | null = null;
-let moduleMap = new ModuleMap();
-let filtersModuleMap: ModuleMap | null = null;
-
-export function start(callback: HooahCallback, params: HooahOptions = {}) {
-    if (targetTid > 0) {
-        console.log('Hooah is already tracing thread: ' + targetTid);
-        return 1;
+export module HooahTrace {
+    interface AnyCpuContext extends PortableCpuContext {
+        [name: string]: NativePointer;
     }
 
-    const { count = -1, filterModules = [] } = params;
-
-    if (targetTid > 0) {
-        console.log('Hooah is already tracing thread: ' + targetTid);
-        return;
+    interface HooahPrintOptions {
+        colored?: boolean;
+        details?: boolean;
+        treeSpaces?: number;
     }
 
-    targetTid = Process.getCurrentThreadId();
-    onInstructionCallback = callback;
+    interface HooahOptions {
+        printBlocks?: boolean;
+        count?: number;
+        filterModules?: string[];
+        printOptions?: HooahPrintOptions;
+    }
 
-    moduleMap.update();
-    filtersModuleMap = new ModuleMap(module => {
-        // do not follow frida agent
-        if (module.name.indexOf('frida-agent') >= 0) {
-            return true;
+    interface PrintInfo {
+        data: string;
+        lineLength: number;
+        details?: PrintInfo[];
+    }
+
+    type HooahCallback = (context: CpuContext, instruction: Instruction) => void;
+
+    const treeTrace: NativePointer[] = [];
+    let targetTid = 0;
+    let onInstructionCallback: HooahCallback | null = null;
+    let moduleMap = new ModuleMap();
+    let filtersModuleMap: ModuleMap | null = null;
+
+    const currentExecutionBlock: PrintInfo[] = [];
+    let currentBlockStartWidth = 0;
+    let currentBlockMaxWidth = 0;
+    let hitRetInstruction = false;
+
+    let sessionPrintBlocks = true;
+    let sessionPrintOptions: HooahPrintOptions;
+    let sessionPrevSepCount = 0;
+
+    export function trace(callback: HooahCallback, params: HooahOptions = {}) {
+        if (targetTid > 0) {
+            console.log('Hooah is already tracing thread: ' + targetTid);
+            return 1;
         }
 
-        let found = false;
-        filterModules.forEach(filter => {
-            if (module.name.indexOf(filter) >= 0) {
-                found = true;
-            }
-        });
-        return found;
-    });
+        const {
+            printBlocks = true,
+            count = -1,
+            filterModules = [],
+            printOptions = {}
+        } = params;
+        sessionPrintBlocks = printBlocks;
+        sessionPrintOptions = printOptions;
+        if (sessionPrintOptions.treeSpaces && sessionPrintOptions.treeSpaces < 4) {
+            sessionPrintOptions.treeSpaces = 4;
+        }
 
-    OnLoadInterceptor.attach((name: string, base: NativePointer) => {
+        if (targetTid > 0) {
+            console.log('Hooah is already tracing thread: ' + targetTid);
+            return;
+        }
+
+        targetTid = Process.getCurrentThreadId();
+        onInstructionCallback = callback;
+
         moduleMap.update();
-        if (filtersModuleMap) {
-            filtersModuleMap.update();
-        }
-    });
-
-    let instructionsCount = 0;
-    let startAddress = NULL;
-
-    Stalker.follow(targetTid, {
-        transform: function (iterator: StalkerArm64Iterator | StalkerX86Iterator) {
-            let instruction: Arm64Instruction | X86Instruction | null;
-            let moduleFilterLocker = false;
-
-            while ((instruction = iterator.next()) !== null) {
-                if (moduleFilterLocker) {
-                    iterator.keep();
-                    continue;
-                }
-
-                if (filtersModuleMap && filtersModuleMap.has(instruction.address)) {
-                    moduleFilterLocker = true;
-                }
-
-                if (!moduleFilterLocker) {
-
-                    // basically skip the first block of code (from frida)
-                    if (startAddress.compare(NULL) === 0) {
-                        startAddress = instruction.address;
-                        moduleFilterLocker = true;
-                    } else {
-                        iterator.putCallout(<(context: PortableCpuContext) => void>onHitInstruction);
-                    }
-                }
-
-                if (count > 0) {
-                    instructionsCount++;
-                    if (instructionsCount === count) {
-                        stop();
-                    }
-                }
-
-                iterator.keep();
-            }
-        }
-    });
-
-    return 0;
-}
-
-export function stop(): void {
-    Stalker.unfollow(targetTid);
-    filtersModuleMap = null;
-    onInstructionCallback = null;
-    treeTrace = [];
-    targetTid = 0;
-}
-
-function applyColorFilters(text: string): string {
-    text = text.toString();
-    text = text.replace(/(\W|^)([a-z]{1,4}\d{0,2})(\W|$)/gm, "$1" + colorify("$2", 'blue') + "$3");
-    text = text.replace(/(0x[0123456789abcdef]+)/gm, colorify("$1", 'red'));
-    text = text.replace(/#(\d+)/gm, "#" + colorify("$1", 'red'));
-    return text;
-}
-
-function ba2hex(b: ArrayBuffer): string {
-    let uint8arr = new Uint8Array(b);
-    if (!uint8arr) {
-        return '';
-    }
-    let hexStr = '';
-    for (let i = 0; i < uint8arr.length; i++) {
-        let hex = (uint8arr[i] & 0xff).toString(16);
-        hex = (hex.length === 1) ? '0' + hex : hex;
-        hexStr += hex;
-    }
-    return hexStr;
-}
-
-function colorify(what: string, pat:string): string {
-    if (pat === 'filter') {
-        return applyColorFilters(what);
-    }
-    let ret = '';
-    if (pat.indexOf('red') >= 0) {
-        ret += _red;
-    } else if (pat.indexOf('green') >= 0) {
-        ret += _green;
-    } else if (pat.indexOf('yellow') >= 0) {
-        ret += _yellow;
-    } else if (pat.indexOf('blue') >= 0) {
-        ret += _blue;
-    } else if (pat.indexOf('pink') >= 0) {
-        ret += _pink;
-    } else if (pat.indexOf('cyan') >= 0) {
-        ret += _cyan
-    }
-    if (pat.indexOf('bold') >= 0) {
-        ret += _bold;
-    } else if (pat.indexOf('highlight') >= 0) {
-        ret += _highlight;
-    }
-
-    ret += what;
-    if (pat.indexOf('highlight') >= 0) {
-        ret += _highlight_off;
-    }
-    ret += _resetColor;
-    return ret;
-}
-
-function formatInstruction(
-    context: PortableCpuContext,
-    address: NativePointer,
-    instruction: Instruction,
-    details: boolean,
-    annotation: string,
-    colored: boolean,
-    treeSpace: number): string {
-
-    const anyCtx = context as AnyCpuContext;
-    let line = "";
-    let coloredLine = "";
-    let part: string;
-    let intTreeSpace = 0;
-    let spaceAtOpStr: number;
-
-    const append = function(what: string, color: string | null): void {
-        line += what;
-        if (colored) {
-            if (color) {
-                coloredLine += colorify(what, color);
-            } else {
-                coloredLine += what;
-            }
-        }
-    };
-
-    const appendModuleInfo = function(address: NativePointer): void {
-        const module = moduleMap.find(address);
-        if (module !== null) {
-            append(' (', null);
-            append(module.name, 'green bold');
-            part = '#';
-            append(part, null);
-            part = address.sub(module.base).toString();
-            append(part, 'red');
-            part = ')';
-            append(part, null);
-        }
-    };
-
-    const addSpace = function(count: number): void {
-        append(getSpacer(count + intTreeSpace - line.length), null);
-    };
-
-    if (treeSpace > 0 && treeTrace.length > 0) {
-        intTreeSpace = (treeTrace.length) * treeSpace;
-        append(getSpacer(intTreeSpace), null);
-    }
-
-    append(address.toString(), 'red bold');
-
-    appendModuleInfo(address);
-    addSpace(60);
-
-    const bytes = instruction.address.readByteArray(instruction.size);
-    if (bytes) {
-        part = ba2hex(bytes);
-        append(part, 'yellow');
-    } else {
-        let _fix = '';
-        for (let i=0;i<instruction.size;i++) {
-            _fix += '00';
-        }
-        append(_fix, 'yellow');
-    }
-
-    addSpace(70);
-
-    append(instruction.mnemonic, 'green bold');
-
-    addSpace(80);
-    spaceAtOpStr = line.length;
-    append(instruction.opStr, 'filter');
-
-    if (isJumpInstruction(instruction)) {
-        try {
-            let jumpInsn = getJumpInstruction(instruction, anyCtx);
-            if (jumpInsn) {
-                appendModuleInfo(jumpInsn.address);
-            }
-        } catch (e) {}
-    }
-
-    if (typeof annotation !== 'undefined' && annotation !== '') {
-        addSpace(90);
-
-        append('@' + annotation, 'pink');
-    }
-
-    if (details) {
-        part = formatInstructionDetails(spaceAtOpStr, context, instruction, colored, treeSpace);
-        if (part.length > 0) {
-            append('\n' + part, null);
-        }
-    }
-
-    if (colored) {
-        return coloredLine;
-    }
-    return line;
-}
-
-function formatInstructionDetails(
-    spaceAtOpStr: number,
-    context: PortableCpuContext,
-    instruction: Instruction,
-    colored: boolean,
-    treeSpace: number): string {
-    const anyContext = context as AnyCpuContext;
-    const data: any[] = [];
-    const visited: Set<string> = new Set<string>();
-
-    let insn: Arm64Instruction | X86Instruction | null = null;
-    if (Process.arch === 'arm64') {
-        insn = instruction as Arm64Instruction;
-    } else if (Process.arch === 'ia32' || Process.arch === 'x64') {
-        insn = instruction as X86Instruction;
-    }
-    if (insn != null) {
-        insn.operands.forEach((op: Arm64Operand | X86Operand) => {
-            let reg: Arm64Register | X86Register | undefined;
-            let value = null;
-            let adds = 0;
-            if (op.type === 'mem') {
-                reg = op.value.base;
-                adds = op.value.disp;
-            } else if (op.type === 'reg') {
-                reg = op.value;
-            } else if (op.type === 'imm') {
-                if (data.length > 0) {
-                    value = data[data.length - 1][1];
-                    if (value.constructor.name === 'NativePointer') {
-                        data[data.length - 1][1].add(op.value);
-                    }
-                }
+        filtersModuleMap = new ModuleMap(module => {
+            // do not follow frida agent
+            if (module.name.indexOf('frida-agent') >= 0) {
+                return true;
             }
 
-            if (typeof reg !== 'undefined' && !visited.has(reg)) {
-                visited.add(reg);
-                try {
-                    value = anyContext[reg];
-                    if (typeof value !== 'undefined') {
-                        value = anyContext[reg].add(adds);
-                        data.push([reg, value, getTelescope(value, isJumpInstruction(instruction))]);
-                    } else {
-                        //data.push([reg, 'register not found in context']);
-                    }
-                } catch (e) {
-                    //data.push([reg, 'register not found in context']);
+            let found = false;
+            filterModules.forEach(filter => {
+                if (module.name.indexOf(filter) >= 0) {
+                    found = true;
                 }
+            });
+            return found;
+        });
+
+        OnLoadInterceptor.attach(() => {
+            moduleMap.update();
+            if (filtersModuleMap) {
+                filtersModuleMap.update();
             }
         });
-    }
 
-    let lines: string[] = [];
-    const _applyColor = function(what: string, color: string | null): string {
-        if (colored && color) {
-            what = colorify(what, color);
-        }
-        return what;
-    };
+        let instructionsCount = 0;
+        let startAddress = NULL;
 
-    data.forEach(row => {
-        if (lines.length > 0) {
-            lines[lines.length - 1] += '\n';
-        }
-        let line = getSpacer(spaceAtOpStr);
-        line += _applyColor(row[0], 'blue') + ' = ' + _applyColor(row[1], 'filter');
-        if (row.length > 2 && row[2] !== null) {
-            let part: string = row[2];
-            if (part.length > 0) {
-                line += ' >> ' + row[2];
-            }
-        }
-        lines.push(line);
-    });
+        Stalker.follow(targetTid, {
+            transform: function (iterator: StalkerArm64Iterator | StalkerX86Iterator) {
+                let instruction: Arm64Instruction | X86Instruction | null;
+                let moduleFilterLocker = false;
 
-    let ret = '';
-    lines.forEach( line => {
-        ret += line;
-    });
-    return ret;
-}
-
-function getTelescope(address: NativePointer, isJumpInstruction: boolean): string {
-    if (isJumpInstruction) {
-        try {
-            const instruction = Instruction.parse(address);
-            let ret = colorify(instruction.mnemonic, 'green');
-            return ret + ')';
-        } catch (e) {
-            return "";
-        }
-    } else {
-        try {
-            let asLong = address.readU64().toNumber();
-            let result: string;
-            if (asLong < 0x10000) {
-                result = colorify('0x' + asLong, 'cyan bold')
-            } else {
-                result = colorify('0x' + address.readULong().toString(16), 'red');
-                try {
-                    let str = address.readUtf8String();
-                    if (str && str.length > 0) {
-                        result += ' (' + colorify(str.replace('\n', ' '), 'green bold') + ')'
+                while ((instruction = iterator.next()) !== null) {
+                    if (moduleFilterLocker) {
+                        iterator.keep();
+                        continue;
                     }
-                } catch (e) {}
-            }
-            return result
-        } catch (e) {
-            return "";
-        }
-    }
-}
 
-function getJumpInstruction(instruction: Instruction, context: AnyCpuContext): Instruction | null {
-    let insn: Arm64Instruction | X86Instruction | null = null;
-    if (Process.arch === 'arm64') {
-        insn = instruction as Arm64Instruction;
-    } else if (Process.arch === 'ia32' || Process.arch === 'x64') {
-        insn = instruction as X86Instruction;
-    }
-    if (insn) {
-        if (isJumpInstruction(instruction)) {
-            const lastOp = insn.operands[insn.operands.length - 1];
-            switch (lastOp.type) {
-                case "reg":
-                    return Instruction.parse(context[lastOp.value]);
-                case "imm":
-                    return Instruction.parse(ptr(lastOp.value.toString()))
-            }
-        }
-    }
-    return null;
-}
+                    if (filtersModuleMap && filtersModuleMap.has(instruction.address)) {
+                        moduleFilterLocker = true;
+                    }
 
-function getSpacer(space: number): string {
-    let line = '';
-    for (let i=0;i<space;i++) {
-        line += ' ';
-    }
-    return line;
-}
-
-function isCallInstruction(instruction: Instruction) {
-    return callMnemonics.indexOf(instruction.mnemonic) >= 0;
-}
-
-function isJumpInstruction(instruction: Instruction): boolean {
-    return instruction.groups.indexOf('jump') >= 0 || instruction.groups.indexOf('ret') >= 0;
-}
-
-function isRetInstruction(instuction: Instruction) {
-    return instuction.groups.indexOf('return') >= 0;
-}
-
-function onHitInstruction(context: PortableCpuContext, address: NativePointer): void {
-    address = address || context.pc;
-
-    const instruction: Instruction = Instruction.parse(address);
-    const treeTraceLength = treeTrace.length;
-
-    if (onInstructionCallback !== null) {
-        if (treeTraceLength > 0) {
-            if (instruction.address.compare(treeTrace[treeTraceLength - 1]) === 0) {
-                treeTrace.pop();
-            }
-        }
-
-        const ctx: HooahContext = {
-            context: context,
-            instruction: instruction,
-            print(params: HooahPrintOptions): void {
-                let { details = false, colored = false, annotation = "", treeSpaces = 0 } = params;
-
-                if (treeSpaces > 0 && treeSpaces < 4) {
-                    treeSpaces = 4;
-                }
-
-                if (instruction) {
-                    let line = formatInstruction(
-                        context, address, instruction, details, annotation, colored, treeSpaces);
-                    if (isJumpInstruction(instruction) || isRetInstruction(instruction)) {
-                        line += '\n';
-                        if (details) {
-                            line += '\n\n';
+                    if (!moduleFilterLocker) {
+                        // basically skip the first block of code (from frida)
+                        if (startAddress.compare(NULL) === 0) {
+                            startAddress = instruction.address;
+                            moduleFilterLocker = true;
+                        } else {
+                            iterator.putCallout(<(context: PortableCpuContext) => void>onHitInstruction);
                         }
                     }
-                    console.log(line);
+
+                    if (count > 0) {
+                        instructionsCount++;
+                        if (instructionsCount === count) {
+                            stop();
+                        }
+                    }
+
+                    iterator.keep();
+                }
+            }
+        });
+
+        return 0;
+    }
+
+    export function stop(): void {
+        Stalker.unfollow(targetTid);
+        filtersModuleMap = null;
+        onInstructionCallback = null;
+        treeTrace.length = 0;
+        targetTid = 0;
+
+        currentExecutionBlock.length = 0;
+        currentBlockMaxWidth = 0;
+
+        sessionPrevSepCount = 0;
+    }
+
+    function onHitInstruction(context: PortableCpuContext): void {
+        const address = context.pc;
+        const instruction: Instruction = Instruction.parse(address);
+        const treeTraceLength = treeTrace.length;
+
+        if (onInstructionCallback !== null) {
+            if (hitRetInstruction) {
+                hitRetInstruction = false;
+                if (treeTraceLength > 0) {
+                    treeTrace.pop();
+                }
+            }
+
+            onInstructionCallback.apply({}, [context, instruction]);
+
+            if (sessionPrintBlocks) {
+                const { details = false, colored = false, treeSpaces = 4 } = sessionPrintOptions;
+
+                const isCall = Utils.isCallInstruction(instruction);
+                const isJump = Utils.isJumpInstruction(instruction);
+                const isRet = Utils.isRetInstruction(instruction);
+
+                const line = formatInstruction(context, address, instruction, details, colored, treeSpaces, isJump);
+                currentExecutionBlock.push(line);
+                if (isJump || isRet) {
+                    if (currentExecutionBlock.length > 0) {
+                        blockifyBlock(details);
+                    }
+                    currentExecutionBlock.length = 0;
+                    currentBlockMaxWidth = 0;
+                }
+
+                if (isCall) {
+                    treeTrace.push(instruction.next);
+                } else if (isRet) {
+                    hitRetInstruction = true;
+                }
+            }
+        }
+    }
+
+    function blockifyBlock(details: boolean): void {
+        const divMod = currentBlockMaxWidth % 8;
+        if (divMod !== 0) {
+            currentBlockMaxWidth -= divMod;
+            currentBlockMaxWidth += 8;
+        }
+        const realLineWidth = currentBlockMaxWidth - currentBlockStartWidth;
+        const startSpacer = Utils.getSpacer(currentBlockStartWidth + 1);
+        let sepCount = (realLineWidth + 8) / 4;
+        const topSep = ' _'.repeat(sepCount).substring(1);
+        const botSep = ' \u00AF'.repeat(sepCount).substring(1);
+        const nextSepCount = currentBlockStartWidth + 1 + botSep.length;
+        const emptyLine = formatLine({data: ' '.repeat(currentBlockMaxWidth), lineLength: currentBlockMaxWidth});
+        let topMid = ' ';
+        if (sessionPrevSepCount > 0) {
+            topMid = '|';
+            const sepDiff  = sessionPrevSepCount - nextSepCount;
+            if (sepDiff < 0) {
+                const spacer = Utils.getSpacer(sessionPrevSepCount);
+                if (details) {
+                    console.log(spacer + '|');
+                }
+                console.log(spacer + '|' + '_ '.repeat(-sepDiff / 2));
+                console.log(spacer + Utils.getSpacer(-sepDiff) + '|')
+            } else if (sepDiff > 0) {
+                const spacer = Utils.getSpacer(nextSepCount);
+                console.log(spacer + '|' + '\u00AF '.repeat(sepDiff / 2));
+                if (details) {
+                    console.log(spacer + '|');
+                }
+            }
+        }
+        console.log(startSpacer + topSep + topMid + topSep);
+        currentExecutionBlock.forEach(printInfo => {
+            console.log(emptyLine);
+            if (printInfo.details) {
+                printInfo.details.forEach(detailPrintInfo => {
+                    console.log(formatLine(detailPrintInfo));
+                });
+            }
+            console.log(formatLine(printInfo));
+            console.log(emptyLine);
+        });
+        console.log(startSpacer + botSep + '|' + botSep);
+        sessionPrevSepCount = nextSepCount;
+        console.log(Utils.getSpacer(sessionPrevSepCount) + '|');
+        if (details) {
+            console.log(Utils.getSpacer(sessionPrevSepCount) + '|');
+        }
+    }
+
+    function formatLine(printInfo: PrintInfo) {
+        let toPrint = printInfo.data;
+        toPrint = Utils.insertAt(toPrint, '|    ', currentBlockStartWidth);
+        toPrint += Utils.getSpacer(currentBlockMaxWidth - printInfo.lineLength);
+        toPrint += '    |';
+        return toPrint;
+    }
+
+    function formatInstruction(
+        context: PortableCpuContext,
+        address: NativePointer,
+        instruction: Instruction,
+        details: boolean,
+        colored: boolean,
+        treeSpaces: number,
+        isJump: boolean): PrintInfo {
+
+        const anyCtx = context as AnyCpuContext;
+        let line = "";
+        let coloredLine = "";
+        let part: string;
+        let intTreeSpace = 0;
+        let spaceAtOpStr: number;
+
+        const append = function(what: string, color?: string): void {
+            line += what;
+            if (colored) {
+                if (color) {
+                    coloredLine += Color.colorify(what, color);
+                } else {
+                    coloredLine += what;
                 }
             }
         };
 
-        onInstructionCallback.apply({}, [ctx]);
+        const appendModuleInfo = function(address: NativePointer): void {
+            const module = moduleMap.find(address);
+            if (module !== null) {
+                append(' (');
+                append(module.name, 'green bold');
+                part = '#';
+                append(part);
+                part = address.sub(module.base).toString();
+                append(part, 'red');
+                part = ')';
+                append(part);
+            }
+        };
 
-        if (isCallInstruction(instruction)) {
-            treeTrace.push(instruction.next);
+        const addSpace = function(count: number): void {
+            append(Utils.getSpacer(count + intTreeSpace - line.length));
+        };
+
+        if (treeSpaces > 0 && treeTrace.length > 0) {
+            intTreeSpace = (treeTrace.length) * treeSpaces;
+            append(Utils.getSpacer(intTreeSpace));
         }
+
+        currentBlockStartWidth = line.length;
+        append(address.toString(), 'red bold');
+
+        appendModuleInfo(address);
+        addSpace(40);
+
+        const bytes = instruction.address.readByteArray(instruction.size);
+        if (bytes) {
+            part = Utils.ba2hex(bytes);
+            append(part, 'yellow');
+        } else {
+            let _fix = '';
+            for (let i=0;i<instruction.size;i++) {
+                _fix += '00';
+            }
+            append(_fix, 'yellow');
+        }
+
+        addSpace(50);
+
+        append(instruction.mnemonic, 'green bold');
+
+        addSpace(60);
+        spaceAtOpStr = line.length;
+        append(instruction.opStr, 'filter');
+
+        if (isJump) {
+            try {
+                let jumpInsn = getJumpInstruction(instruction, anyCtx);
+                if (jumpInsn) {
+                    appendModuleInfo(jumpInsn.address);
+                }
+            } catch (e) {}
+        }
+
+        const lineLength = line.length;
+        if (lineLength > currentBlockMaxWidth) {
+            currentBlockMaxWidth = lineLength;
+        }
+
+        let detailsData: PrintInfo[] = [];
+        if (details) {
+            detailsData = formatInstructionDetails(spaceAtOpStr, context, instruction, colored, isJump);
+            detailsData.forEach(detail => {
+                if (detail.lineLength > currentBlockMaxWidth) {
+                    currentBlockMaxWidth = detail.lineLength;
+                }
+            });
+        }
+
+        return {data: colored ? coloredLine : line, lineLength: lineLength, details: detailsData};
+    }
+
+    function formatInstructionDetails(
+        spaceAtOpStr: number,
+        context: PortableCpuContext,
+        instruction: Instruction,
+        colored: boolean,
+        isJump: boolean): PrintInfo[] {
+        const anyContext = context as AnyCpuContext;
+        const data: any[] = [];
+        const visited: Set<string> = new Set<string>();
+
+        let insn: Arm64Instruction | X86Instruction | null = null;
+        if (Process.arch === 'arm64') {
+            insn = instruction as Arm64Instruction;
+        } else if (Process.arch === 'ia32' || Process.arch === 'x64') {
+            insn = instruction as X86Instruction;
+        }
+        if (insn != null) {
+            insn.operands.forEach((op: Arm64Operand | X86Operand) => {
+                let reg: Arm64Register | X86Register | undefined;
+                let value = null;
+                let adds = 0;
+                if (op.type === 'mem') {
+                    reg = op.value.base;
+                    adds = op.value.disp;
+                } else if (op.type === 'reg') {
+                    reg = op.value;
+                }
+
+                if (typeof reg !== 'undefined' && !visited.has(reg)) {
+                    visited.add(reg);
+                    try {
+                        value = anyContext[reg];
+                        if (typeof value !== 'undefined') {
+                            value = anyContext[reg].add(adds);
+                            data.push([reg, value, getTelescope(value, isJump)]);
+                        } else {
+                            //data.push([reg, 'register not found in context']);
+                        }
+                    } catch (e) {
+                        //data.push([reg, 'register not found in context']);
+                    }
+                }
+            });
+        }
+
+        const applyColor = function(what: string, color: string | null): string {
+            if (colored && color) {
+                what = Color.colorify(what, color);
+            }
+            return what;
+        };
+
+        let lines: PrintInfo[] = [];
+        data.forEach(row => {
+            let line = Utils.getSpacer(spaceAtOpStr);
+            let lineLength = spaceAtOpStr + row[0].length + row[1].toString().length + 3;
+            line += applyColor(row[0], 'blue') + ' = ' + applyColor(row[1], 'filter');
+            if (row.length > 2 && row[2] !== null) {
+                const printInfo = row[2] as PrintInfo;
+                if (printInfo.lineLength > 0) {
+                    line += ' >> ' + printInfo.data;
+                    lineLength += printInfo.lineLength + 4;
+                }
+            }
+            lines.push({data: line, lineLength: lineLength});
+        });
+        return lines;
+    }
+
+    function getTelescope(address: NativePointer, isJump: boolean): PrintInfo {
+        if (isJump) {
+            try {
+                const instruction = Instruction.parse(address);
+                let ret = Color.colorify(instruction.mnemonic, 'green');
+                ret += ' ' + instruction.opStr;
+                return {data: ret, lineLength: instruction.mnemonic.length + instruction.opStr.length + 1};
+            } catch (e) {}
+        } else {
+            let count = 0;
+            let current = address;
+            let result: string = "";
+            let resLen = 0;
+            while (true) {
+                try {
+                    current = current.readPointer();
+                    const asStr = current.toString();
+                    if (result.length > 0) {
+                        result += ' >> ';
+                        resLen += 4;
+                    }
+                    resLen += asStr.length;
+                    if (current.compare(0x10000) < 0) {
+                        result += Color.colorify(asStr, 'cyan bold');
+                        break;
+                    } else {
+                        result += Color.colorify(asStr, 'red');
+
+                        try {
+                            let str = address.readUtf8String();
+                            if (str && str.length > 0) {
+                                result += ' (' + Color.colorify(str.replace('\n', ' '),'green bold') + ')';
+                                resLen += str.length + 3;
+                            }
+                        } catch (e) {}
+                    }
+                    if (count === 5) {
+                        break;
+                    }
+                    count += 1;
+                } catch (e) {
+                    break;
+                }
+            }
+            return {data: result, lineLength: resLen};
+        }
+
+        return {data: '', lineLength: 0};
+    }
+
+    function getJumpInstruction(instruction: Instruction, context: AnyCpuContext): Instruction | null {
+        let insn: Arm64Instruction | X86Instruction | null = null;
+        if (Process.arch === 'arm64') {
+            insn = instruction as Arm64Instruction;
+        } else if (Process.arch === 'ia32' || Process.arch === 'x64') {
+            insn = instruction as X86Instruction;
+        }
+        if (insn) {
+            if (Utils.isJumpInstruction(instruction)) {
+                const lastOp = insn.operands[insn.operands.length - 1];
+                switch (lastOp.type) {
+                    case "reg":
+                        return Instruction.parse(context[lastOp.value]);
+                    case "imm":
+                        return Instruction.parse(ptr(lastOp.value.toString()))
+                }
+            }
+        }
+        return null;
     }
 }

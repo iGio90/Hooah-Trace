@@ -31,51 +31,38 @@ npm run watch
 
 example code
 ```typescript
-import * as hooah from "hooah-trace";
+import {HooahTrace} from "hooah-trace";
 
-function onHookInstruction(hc: hooah.HooahContext) {
-    // use for fun and profit
-    // hc.context
-    // hc.instruction
-    // hc.print
-
-    // the following code is meant to show the api exposed by htrace
-    const mnemonic = hc.instruction.mnemonic;
-
-    // count stp instructions
-    let stpCount: number = 0;
-
-    // build our print option, if we want to use it
-    const printOptions: hooah.HooahPrintOptions = {};
-
-    // yes please
-    printOptions.colored = true;
-
-    // add some spaces to highlight calls/ret
-    printOptions.treeSpaces = 4;
-
-    if (mnemonic === 'ldr') {
-        // print the instruction with register details
-        printOptions.details = true;
-    } else if (mnemonic === 'stp') {
-        // add some notes to stp instructions
-        stpCount += 1;
-        printOptions.annotation = 'stpCount: ' + stpCount;
-    } else {
-        // print all other instructions with default options
-    }
-
-    hc.print(printOptions);
+function onHookInstruction(context: CpuContext, instruction: Instruction) {
+    // console.log(JSON.stringify(context));
+    // console.log(JSON.stringify(instruction));
+    // console.log('');
 }
 
 const target = Module.findExportByName(null, 'open');
 if (target) {
     Interceptor.attach(target, function () {
-        hooah.start(onHookInstruction, {
+        HooahTrace.trace(onHookInstruction, {
+            // print the execution blocks
+            printBlocks: true,
+
             // -1 is endless
             count: -1,
+
             // do not trace jumps in excluded modules (i.e libc / libSystem)
-            filterModules: ['libc.so']
+            filterModules: ['libc.so'],
+
+            // style block prints
+            printOptions: {
+                // yes please
+                colored: true,
+
+                // custom space between blocks
+                treeSpaces: 8,
+
+                // include involved register values data
+                details: true
+            }
         });
     });
 }
@@ -162,6 +149,13 @@ jumping to range 0x72496d3000 >> /data/app/com.target/lib/arm64/libtarget.so
 
 ## changelog
 
+**2019.06.27**
+```
+* refactored to be more flexible and tiny
+* removed print() in favor of print blocks option
+* added graph highlithing execution blocks
+* various minor improvements
+```
 **2019.06.24**
 ```
 * added rangeOnly option

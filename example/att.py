@@ -37,7 +37,7 @@ if not os.path.exists('_agent.js'):
     exit(0)
 
 d = frida.get_usb_device()
-pid = d.spawn('com.my.target')
+pid = d.spawn('com.android.calculator2')
 session = d.attach(pid)
 script = session.create_script(open('_agent.js', 'r').read())
 script.on('message', on_message)
