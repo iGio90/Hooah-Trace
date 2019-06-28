@@ -1,13 +1,11 @@
 # Hooah Trace
 
-a simple yet powerful instruction tracing for frida.
-
-an hook is placed to target provided which start the instruction tracing using frida Stalker.
-
-currently supporting arm64 and x64
+a simple yet powerful instruction tracing using frida stalker - supporting arm64 and x64
 
 ## when you want to use this
-when you need to trace at single instruction and perform additional operations or alter the code flow
+when you need to trace at single instruction and perform additional operations or alter the code flow.
+
+when you need to get a proper understanding of what's going on down there with obfuscations killing the party.
 
 
 ## install

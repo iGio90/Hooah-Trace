@@ -367,8 +367,13 @@ export module HooahTrace {
                     const contextVal = context[reg.reg];
                     if (contextVal && contextVal.compare(reg.value) !== 0) {
                         const toStr = contextVal.toString();
-                        const str = getSpacer(spaceAtOpStr) + Color.colorify(reg.reg, 'blue bold') + ' = ' +
-                            Color.colorify(toStr, 'red');
+                        let str = getSpacer(spaceAtOpStr);
+                        if (colored) {
+                            str += Color.colorify(reg.reg, 'blue bold') + ' = ' +
+                                Color.colorify(toStr, 'red')
+                        } else {
+                            str += reg.reg + ' = ' + toStr;
+                        }
                         postLines.push({data: str, lineLength: spaceAtOpStr + reg.reg.length + toStr.length + 3})
                     }
                 });
