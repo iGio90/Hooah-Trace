@@ -1,6 +1,6 @@
 import {Color} from "./color";
 import {Utils} from "./utils";
-import * as OnLoadInterceptor from "frida-onload"
+import {OnLoadInterceptor} from "frida-onload"
 
 export module HooahTrace {
     import getSpacer = Utils.getSpacer;
@@ -19,6 +19,7 @@ export module HooahTrace {
         printBlocks?: boolean;
         count?: number;
         filterModules?: string[];
+        instructions?: string[],
         printOptions?: HooahPrintOptions;
     }
 
@@ -62,6 +63,7 @@ export module HooahTrace {
             printBlocks = true,
             count = -1,
             filterModules = [],
+            instructions = [],
             printOptions = {}
         } = params;
         sessionPrintBlocks = printBlocks;
@@ -127,6 +129,11 @@ export module HooahTrace {
                             startAddress = instruction.address;
                             moduleFilterLocker = true;
                         } else {
+                            if (instructions.length > 0 && instructions.indexOf(instruction.mnemonic) < 0) {
+                                iterator.keep();
+                                continue;
+                            }
+
                             iterator.putCallout(<(context: PortableCpuContext) => void>onHitInstruction);
                         }
                     }
