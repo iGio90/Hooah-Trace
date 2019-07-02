@@ -440,7 +440,7 @@ export module HooahTrace {
                             value = anyContext[reg];
                             let regLabel = reg.toString();
                             data.push([regLabel, value.toString() + (adds > 0 ? '#' + adds.toString(16) : ''),
-                                getTelescope(value.add(adds), isJump)]);
+                                getTelescope(value.add(adds), colored, isJump)]);
                         } else {
                             //data.push([reg, 'register not found in context']);
                         }
@@ -475,11 +475,16 @@ export module HooahTrace {
         return lines;
     }
 
-    function getTelescope(address: NativePointer, isJump: boolean): PrintInfo {
+    function getTelescope(address: NativePointer, colored: boolean, isJump: boolean): PrintInfo {
         if (isJump) {
             try {
                 const instruction = Instruction.parse(address);
-                let ret = Color.colorify(instruction.mnemonic, 'green');
+                let ret;
+                if (colored) {
+                    ret = Color.colorify(instruction.mnemonic, 'green');
+                } else {
+                    ret = instruction.mnemonic;
+                }
                 ret += ' ' + instruction.opStr;
                 return {data: ret, lineLength: instruction.mnemonic.length + instruction.opStr.length + 1};
             } catch (e) {}
@@ -498,15 +503,28 @@ export module HooahTrace {
                     }
                     resLen += asStr.length;
                     if (current.compare(0x10000) < 0) {
-                        result += Color.colorify(asStr, 'cyan bold');
+                        if (colored) {
+                            result += Color.colorify(asStr, 'cyan bold');
+                        } else {
+                            result += asStr;
+                        }
                         break;
                     } else {
-                        result += Color.colorify(asStr, 'red');
+                        if (colored) {
+                            result += Color.colorify(asStr, 'red');
+                        } else {
+                            result += asStr;
+                        }
 
                         try {
                             let str = address.readUtf8String();
                             if (str && str.length > 0) {
-                                result += ' (' + Color.colorify(str.replace('\n', ' '),'green bold') + ')';
+                                let ret = str.replace('\n', ' ');
+                                if (colored) {
+                                    result += ' (' + Color.colorify(ret,'green bold') + ')';
+                                } else {
+                                    result += ' (' + ret + ')';
+                                }
                                 resLen += str.length + 3;
                             }
                         } catch (e) {}
