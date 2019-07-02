@@ -19,6 +19,9 @@ if (target) {
             // do not trace jumps in excluded modules (i.e libc / libSystem)
             filterModules: ['libc.so'],
 
+            // you can trace specific instructions with
+            // instructions: ['svc', 'ldr']
+
             // style block prints
             printOptions: {
                 // yes please

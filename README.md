@@ -50,6 +50,9 @@ if (target) {
             // do not trace jumps in excluded modules (i.e libc / libSystem)
             filterModules: ['libc.so'],
 
+            // you can trace specific instructions with
+            // instructions: ['svc', 'ldr']
+
             // style block prints
             printOptions: {
                 // yes please
@@ -83,6 +86,11 @@ if (target) {
 
 ## changelog
 
+**2019.07.02**
+```
+* added ability to filter for specific instructions
+* fixed colored telescope in uncolored mode
+```
 **2019.06.27**
 ```
 * refactored to be more flexible and tiny
