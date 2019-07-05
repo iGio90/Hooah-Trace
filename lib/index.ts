@@ -53,10 +53,15 @@ export module HooahTrace {
     let sessionPrintOptions: HooahPrintOptions;
     let sessionPrevSepCount = 0;
 
-    export function trace(callback: HooahCallback, params: HooahOptions = {}) {
+    export function trace(params: HooahOptions = {}, callback: HooahCallback | undefined) {
         if (targetTid > 0) {
             console.log('Hooah is already tracing thread: ' + targetTid);
             return 1;
+        }
+
+        if (targetTid > 0) {
+            console.log('Hooah is already tracing thread: ' + targetTid);
+            return;
         }
 
         const {
@@ -72,13 +77,12 @@ export module HooahTrace {
             sessionPrintOptions.treeSpaces = 4;
         }
 
-        if (targetTid > 0) {
-            console.log('Hooah is already tracing thread: ' + targetTid);
-            return;
-        }
-
         targetTid = Process.getCurrentThreadId();
-        onInstructionCallback = callback;
+        if (callback) {
+            onInstructionCallback = callback;
+        } else {
+            onInstructionCallback = null;
+        }
 
         moduleMap.update();
         filtersModuleMap = new ModuleMap(module => {
@@ -371,7 +375,7 @@ export module HooahTrace {
             if (currentExecutionBlockStackRegisters.length > 0) {
                 let postLines: PrintInfo[] = [];
                 currentExecutionBlockStackRegisters.forEach(reg => {
-                    const contextVal = context[reg.reg];
+                    const contextVal = getRegisterValue(context, reg.reg);
                     if (contextVal && contextVal.compare(reg.value) !== 0) {
                         const toStr = contextVal.toString();
                         let str = getSpacer(spaceAtOpStr);
@@ -433,20 +437,15 @@ export module HooahTrace {
                 if (typeof reg !== 'undefined' && !visited.has(reg)) {
                     visited.add(reg);
                     try {
-                        value = anyContext[reg];
+                        value = getRegisterValue(anyContext, reg);
                         if (typeof value !== 'undefined') {
-                            currentExecutionBlockStackRegisters.push({
-                                reg: reg.toString(), value: value});
-                            value = anyContext[reg];
+                            currentExecutionBlockStackRegisters.push({reg: reg.toString(), value: value});
+                            value = getRegisterValue(anyContext, reg);
                             let regLabel = reg.toString();
                             data.push([regLabel, value.toString() + (adds > 0 ? '#' + adds.toString(16) : ''),
                                 getTelescope(value.add(adds), colored, isJump)]);
-                        } else {
-                            //data.push([reg, 'register not found in context']);
                         }
-                    } catch (e) {
-                        //data.push([reg, 'register not found in context']);
-                    }
+                    } catch (e) {}
                 }
             });
         }
@@ -521,7 +520,7 @@ export module HooahTrace {
                             if (str && str.length > 0) {
                                 let ret = str.replace('\n', ' ');
                                 if (colored) {
-                                    result += ' (' + Color.colorify(ret,'green bold') + ')';
+                                    result += ' (' + Color.colorify(ret,'green') + ')';
                                 } else {
                                     result += ' (' + ret + ')';
                                 }
@@ -562,5 +561,15 @@ export module HooahTrace {
             }
         }
         return null;
+    }
+
+    function getRegisterValue(context: AnyCpuContext, reg: string): NativePointer {
+        if (Process.arch === 'arm64') {
+            if (reg.startsWith('w')) {
+                return context[reg.replace('w', 'x')].and(0x00000000FFFFFFFF);
+            }
+        }
+
+        return context[reg];
     }
 }

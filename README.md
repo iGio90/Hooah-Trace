@@ -86,6 +86,11 @@ if (target) {
 
 ## changelog
 
+**2019.07.05**
+```
+* arm64: parse W registers
+* swap callback and options so that you can just define print options
+```
 **2019.07.02**
 ```
 * added ability to filter for specific instructions
