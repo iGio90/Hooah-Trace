@@ -40,7 +40,7 @@ function onHookInstruction(context: CpuContext, instruction: Instruction) {
 const target = Module.findExportByName(null, 'open');
 if (target) {
     Interceptor.attach(target, function () {
-        HooahTrace.trace(onHookInstruction, {
+        HooahTrace.trace({
             // print the execution blocks
             printBlocks: true,
 
@@ -64,7 +64,7 @@ if (target) {
                 // include involved register values data
                 details: true
             }
-        });
+        }, onHookInstruction);
     });
 }
 ```
